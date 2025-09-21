@@ -15,7 +15,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Dict, Any
 
-DEFAULT_JSON = Path("data/rs_summaries.json")
+DEFAULT_JSON = Path("../data/rs_summaries.json")
 
 
 @lru_cache(maxsize=1)

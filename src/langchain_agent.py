@@ -1,6 +1,7 @@
 from langchain.agents import initialize_agent, Tool
-from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain.agents.agent_types import AgentType
+import os
 from agent_tools import list_rs, filter_rs, top_n_rs, print_report_tool
 
 tools = [

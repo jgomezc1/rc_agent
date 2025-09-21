@@ -40,15 +40,15 @@ def print_report(best: Dict[str, Any]) -> str:
     best = {k.lower(): v for k, v in best.items()}   # normalise keys
 
     lines = [
-        f"🏷  RS:            {best.get('id', best.get('rs_id'))}",
-        f"🔩 Steel tonnage:  {best['steel_tonnage']:.1f} t",
-        f"👷 Man‑hours:      {best['manhours']}",
-        f"💰 Material cost:  ${(best['steel_cost'] + best['concrete_cost']):,.0f}",
-        f"📆 Duration:       {best['duration_days']} days",
-        f"🌱 CO₂ trapped:    {best.get('co2_tonnes', best.get('co2'))} t",
-        f"⚙️  Constructibility index: "
+        f"RS:            {best.get('id', best.get('rs_id'))}",
+        f"Steel tonnage:  {best['steel_tonnage']:.1f} t",
+        f"Man-hours:      {best['manhours']}",
+        f"Material cost:  ${(best['steel_cost'] + best['concrete_cost']):,.0f}",
+        f"Duration:       {best['duration_days']} days",
+        f"CO2 trapped:    {best.get('co2_tonnes', best.get('co2'))} t",
+        f"Constructibility index: "
         f"{best.get('constructibility_index', best.get('ci')):.2f}",
-        f"📐 Bar geometries: {best['bar_geometries']}",
+        f"Bar geometries: {best['bar_geometries']}",
     ]
     return "\n".join(lines)
 # ------------------------------------------------------------------ #

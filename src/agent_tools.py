@@ -1,26 +1,26 @@
 import json
 import pandas as pd
-from typing import TypedDict
+from pydantic import BaseModel
 from langchain.tools import tool
 
 # Simulated data loading
 def _df_rs():
-    with open("data/simulated_rs_data.json", "r") as f:
+    with open("../data/simulated_rs_data.json", "r") as f:
         return pd.DataFrame(json.load(f))
 
 # ---- Tool Schemas ----
 
-class ListRsInput(TypedDict):
-    input: str  # Dummy field to comply with single-input structure
+class ListRsInput(BaseModel):
+    input: str = ""  # Dummy field to comply with single-input structure
 
-class FilterRsInput(TypedDict):
+class FilterRsInput(BaseModel):
     where: str
 
-class TopNRsInput(TypedDict):
+class TopNRsInput(BaseModel):
     metric: str
-    n: int
+    n: int = 3
 
-class PrintReportInput(TypedDict):
+class PrintReportInput(BaseModel):
     rs_json: str
 
 # ---- Tools ----
