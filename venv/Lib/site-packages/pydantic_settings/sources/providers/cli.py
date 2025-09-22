@@ -119,6 +119,7 @@ class CliSettingsSource(EnvSettingsSource, Generic[T]):
             (e.g. --flag, --no-flag). Defaults to `False`.
         cli_ignore_unknown_args: Whether to ignore unknown CLI args and parse only known ones. Defaults to `False`.
         cli_kebab_case: CLI args use kebab case. Defaults to `False`.
+        cli_shortcuts: Mapping of target field name to alias names. Defaults to `None`.
         case_sensitive: Whether CLI "--arg" names should be read with case-sensitivity. Defaults to `True`.
             Note: Case-insensitive matching is only supported on the internal root parser and does not apply to CLI
             subcommands.
@@ -150,6 +151,7 @@ class CliSettingsSource(EnvSettingsSource, Generic[T]):
         cli_implicit_flags: bool | None = None,
         cli_ignore_unknown_args: bool | None = None,
         cli_kebab_case: bool | None = None,
+        cli_shortcuts: Mapping[str, str | list[str]] | None = None,
         case_sensitive: bool | None = True,
         root_parser: Any = None,
         parse_args_method: Callable[..., Any] | None = None,
@@ -161,6 +163,9 @@ class CliSettingsSource(EnvSettingsSource, Generic[T]):
     ) -> None:
         self.cli_prog_name = (
             cli_prog_name if cli_prog_name is not None else settings_cls.model_config.get('cli_prog_name', sys.argv[0])
+        )
+        self.cli_parse_args = (
+            cli_parse_args if cli_parse_args is not None else settings_cls.model_config.get('cli_parse_args', None)
         )
         self.cli_hide_none_type = (
             cli_hide_none_type
@@ -212,6 +217,9 @@ class CliSettingsSource(EnvSettingsSource, Generic[T]):
         self.cli_kebab_case = (
             cli_kebab_case if cli_kebab_case is not None else settings_cls.model_config.get('cli_kebab_case', False)
         )
+        self.cli_shortcuts = (
+            cli_shortcuts if cli_shortcuts is not None else settings_cls.model_config.get('cli_shortcuts', None)
+        )
 
         case_sensitive = case_sensitive if case_sensitive is not None else True
         if not case_sensitive and root_parser is not None:
@@ -247,15 +255,14 @@ class CliSettingsSource(EnvSettingsSource, Generic[T]):
             add_subparsers_method=add_subparsers_method,
             formatter_class=formatter_class,
         )
-
-        if cli_parse_args not in (None, False):
-            if cli_parse_args is True:
-                cli_parse_args = sys.argv[1:]
-            elif not isinstance(cli_parse_args, (list, tuple)):
+        if self.cli_parse_args not in (None, False):
+            if self.cli_parse_args is True:
+                self.cli_parse_args = sys.argv[1:]
+            elif not isinstance(self.cli_parse_args, (list, tuple)):
                 raise SettingsError(
-                    f'cli_parse_args must be a list or tuple of strings, received {type(cli_parse_args)}'
+                    f'cli_parse_args must be a list or tuple of strings, received {type(self.cli_parse_args)}'
                 )
-            self._load_env_vars(parsed_args=self._parse_args(self.root_parser, cli_parse_args))
+            self._load_env_vars(parsed_args=self._parse_args(self.root_parser, self.cli_parse_args))
 
     @overload
     def __call__(self) -> dict[str, Any]: ...
@@ -448,8 +455,13 @@ class CliSettingsSource(EnvSettingsSource, Generic[T]):
     def _consume_object_or_array(self, item: str, merged_list: list[str]) -> str:
         count = 1
         close_delim = '}' if item.startswith('{') else ']'
+        in_str = False
         for consumed in range(1, len(item)):
-            if item[consumed] in ('{', '['):
+            if item[consumed] == '"' and item[consumed - 1] != '\\':
+                in_str = not in_str
+            elif in_str:
+                continue
+            elif item[consumed] in ('{', '['):
                 count += 1
             elif item[consumed] in ('}', ']'):
                 count -= 1
@@ -587,7 +599,7 @@ class CliSettingsSource(EnvSettingsSource, Generic[T]):
                     if matched:
                         arg = matched.group(1).lower() + matched.group(2)
                     insensitive_args.append(arg)
-                return parser_method(root_parser, insensitive_args, namespace)  # type: ignore
+                return parser_method(root_parser, insensitive_args, namespace)
 
             return parse_args_insensitive_method
 
@@ -867,6 +879,13 @@ class CliSettingsSource(EnvSettingsSource, Generic[T]):
                 )
                 if arg_name not in added_args:
                     arg_names.append(arg_name)
+
+        if self.cli_shortcuts:
+            for target, aliases in self.cli_shortcuts.items():
+                if target in arg_names:
+                    alias_list = [aliases] if isinstance(aliases, str) else aliases
+                    arg_names.extend(alias for alias in alias_list if alias not in added_args)
+
         return arg_names
 
     def _add_parser_submodels(
@@ -923,11 +942,13 @@ class CliSettingsSource(EnvSettingsSource, Generic[T]):
 
         preferred_alias = alias_names[0]
         is_model_suppressed = self._is_field_suppressed(field_info) or is_model_suppressed
+        if is_model_suppressed:
+            model_group_kwargs['description'] = CLI_SUPPRESS
         if not self.cli_avoid_json:
             added_args.append(arg_names[0])
             kwargs['nargs'] = '?'
             kwargs['const'] = '{}'
-            kwargs['help'] = kwargs['help'] = (
+            kwargs['help'] = (
                 CLI_SUPPRESS if is_model_suppressed else f'set {arg_names[0]} from JSON string (default: {{}})'
             )
             model_group = self._add_group(parser, **model_group_kwargs)
