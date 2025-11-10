@@ -54,3 +54,6 @@ htmlcov/
 temp/
 tmp/
 *.tmp
+
+# results files
+logistics_outputs/
