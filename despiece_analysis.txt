@@ -1,0 +1,25 @@
+SHEET 1: Resumen_Refuerzo (Summary per floor)
+================================================================================
+Columns: ['PROYECTO: Ejemplo Mokara', 'Unnamed: 1', 'Unnamed: 2', 'Unnamed: 3']
+Shape: (29, 4)
+
+SHEET 2: RefLong_PorElemento (Longitudinal reinforcement per element)
+================================================================================
+Columns: ['DESPIECE DE REFUERZO LONGITUDINAL POR ELEMENTO', 'Unnamed: 1', 'Unnamed: 2', 'Unnamed: 3', 'Unnamed: 4', 'Unnamed: 5', 'Unnamed: 6', 'Unnamed: 7', 'Unnamed: 8', 'Unnamed: 9', 'Unnamed: 10', 'Unnamed: 11', 'Unnamed: 12']
+Shape: (2496, 13)
+Shape after dropping empty rows: (2496, 13)
+
+SHEET 3: RefLong_Total (Total longitudinal reinforcement)
+================================================================================
+Columns: ['DESPIECE TOTAL DE REFUERZO LONGITUDINAL', 'Unnamed: 1', 'Unnamed: 2', 'Unnamed: 3', 'Unnamed: 4', 'Unnamed: 5', 'Unnamed: 6', 'Unnamed: 7', 'Unnamed: 8', 'Unnamed: 9', 'Unnamed: 10']
+Shape: (77, 11)
+
+SHEET 4: RefTrans_PorElemento (Transverse reinforcement per element)
+================================================================================
+Columns: ['DESPIECE DE REFUERZO TRANSVERSAL POR ELEMENTO', 'Unnamed: 1', 'Unnamed: 2', 'Unnamed: 3', 'Unnamed: 4', 'Unnamed: 5', 'Unnamed: 6', 'Unnamed: 7', 'Unnamed: 8', 'Unnamed: 9', 'Unnamed: 10']
+Shape: (339, 11)
+
+SHEET 5: RefTrans_Total (Total transverse reinforcement)
+================================================================================
+Columns: ['DESPIECE TOTAL DE REFUERZO TRANSVERSAL', 'Unnamed: 1', 'Unnamed: 2', 'Unnamed: 3', 'Unnamed: 4', 'Unnamed: 5', 'Unnamed: 6', 'Unnamed: 7', 'Unnamed: 8']
+Shape: (12, 9)
