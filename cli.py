@@ -6,6 +6,7 @@ Usage:
     python cli.py                           # Interactive mode with agent selection
     python cli.py --grouping "query"        # Grouping optimizer single query
     python cli.py --procurement "query"     # Procurement agent single query
+    python cli.py --scheduling "query"      # Scheduling agent single query
 """
 
 import sys
@@ -56,6 +57,18 @@ AGENTS = {
             'Give me a procurement report for PISO 5',
             'Generate a PDF report for floors PISO 5 through PISO 11',
             'What floors are available?'
+        ]
+    },
+    '3': {
+        'name': 'Scheduling Agent',
+        'description': 'Plan rebar installation schedules and analyze floor durations',
+        'module': 'scheduling_agent',
+        'class': 'SchedulingAgent',
+        'examples': [
+            'What is the duration for each floor?',
+            'Which floor is the bottleneck?',
+            'What if I use 3 crews for beams instead of 2?',
+            'How long would it take with 10-hour workdays?'
         ]
     }
 }
@@ -147,11 +160,22 @@ def main():
             print(agent.run(query))
             return 0
 
+        elif arg == '--scheduling' and len(sys.argv) > 2:
+            from scheduling_agent import SchedulingAgent
+            query = " ".join(sys.argv[2:])
+            print("Initializing Scheduling Agent...")
+            agent = SchedulingAgent()
+            print(f"\nQuery: {query}\n")
+            print("-" * 60)
+            print(agent.run(query))
+            return 0
+
         elif arg in ['--help', '-h']:
             print("Usage:")
             print("  python cli.py                           # Interactive mode")
             print("  python cli.py --grouping \"query\"        # Grouping optimizer")
             print("  python cli.py --procurement \"query\"     # Procurement agent")
+            print("  python cli.py --scheduling \"query\"      # Scheduling agent")
             return 0
 
         else:
