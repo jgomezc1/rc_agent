@@ -21,6 +21,13 @@ from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
 
+# Load environment variables
+load_dotenv()
+
+# Configure logging (must be before PDF imports to enable warning)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 # PDF generation imports
 try:
     from reportlab.lib import colors
@@ -33,13 +40,6 @@ try:
 except ImportError:
     PDF_AVAILABLE = False
     logger.warning("reportlab not installed. PDF generation will be disabled.")
-
-# Load environment variables
-load_dotenv()
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -1823,14 +1823,27 @@ If PDF generation fails, explain the error and still provide the data summary.""
             prompt=self.SYSTEM_PROMPT
         )
 
-    def run(self, user_input: str, chat_history: Optional[List] = None) -> str:
-        """Execute the agent with user input."""
+    def run(self, user_input: str, chat_history: Optional[List] = None, max_iterations: int = 15) -> str:
+        """Execute the agent with user input.
+
+        Args:
+            user_input: User's request/query
+            chat_history: Optional conversation history
+            max_iterations: Maximum number of agent iterations to prevent infinite loops (default: 15)
+
+        Returns:
+            Agent's response string
+        """
         messages = []
         if chat_history:
             messages.extend(chat_history)
         messages.append(HumanMessage(content=user_input))
 
-        result = self.agent.invoke({"messages": messages})
+        # Invoke with recursion limit to prevent infinite loops
+        result = self.agent.invoke(
+            {"messages": messages},
+            config={"recursion_limit": max_iterations}
+        )
 
         if result.get("messages"):
             return result["messages"][-1].content

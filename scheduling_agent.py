@@ -296,6 +296,7 @@ Present results in clear, structured format:
         self,
         user_input: str,
         chat_history: Optional[List] = None,
+        max_iterations: int = 15,
     ) -> str:
         """
         Run the scheduling agent on a user query.
@@ -303,6 +304,7 @@ Present results in clear, structured format:
         Args:
             user_input: The user's question or request.
             chat_history: Optional list of previous messages for context.
+            max_iterations: Maximum number of agent iterations to prevent infinite loops (default: 15)
 
         Returns:
             The final assistant message content as a string.
@@ -314,7 +316,11 @@ Present results in clear, structured format:
 
         messages.append(HumanMessage(content=user_input))
 
-        result = self.agent.invoke({"messages": messages})
+        # Invoke with recursion limit to prevent infinite loops
+        result = self.agent.invoke(
+            {"messages": messages},
+            config={"recursion_limit": max_iterations}
+        )
 
         if result.get("messages"):
             return result["messages"][-1].content

@@ -10,6 +10,9 @@ Usage:
 """
 
 import sys
+import threading
+import time
+import itertools
 from langchain_core.messages import HumanMessage, AIMessage
 
 # ANSI color codes
@@ -18,6 +21,40 @@ CYAN = "\033[96m"
 YELLOW = "\033[93m"
 RESET = "\033[0m"
 BOLD = "\033[1m"
+
+
+class Spinner:
+    """Animated spinner to show processing activity."""
+
+    def __init__(self, message="Processing", delay=0.1):
+        self.message = message
+        self.delay = delay
+        self.running = False
+        self.thread = None
+        self.spinner_chars = itertools.cycle(['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
+
+    def _spin(self):
+        while self.running:
+            char = next(self.spinner_chars)
+            sys.stdout.write(f'\r{YELLOW}{char} {self.message}...{RESET}')
+            sys.stdout.flush()
+            time.sleep(self.delay)
+
+    def __enter__(self):
+        self.running = True
+        self.thread = threading.Thread(target=self._spin)
+        self.thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.running = False
+        if self.thread:
+            self.thread.join()
+        # Clear the spinner line
+        sys.stdout.write('\r' + ' ' * (len(self.message) + 20) + '\r')
+        sys.stdout.flush()
+        return False
+
 
 MAIN_BANNER = f"""
 {GREEN}╔═══════════════════════════════════════════════════════════════╗
@@ -120,7 +157,8 @@ def run_interactive(agent, agent_info):
 
         print()
         try:
-            response = agent.run(user_input, chat_history=chat_history)
+            with Spinner("Thinking"):
+                response = agent.run(user_input, chat_history=chat_history)
             print(f"{GREEN}Agent:{RESET} {response}")
             print()
 
@@ -147,7 +185,9 @@ def main():
             agent = GroupingOptimizerAgent()
             print(f"\nQuery: {query}\n")
             print("-" * 60)
-            print(agent.run(query))
+            with Spinner("Analyzing floor groupings"):
+                result = agent.run(query)
+            print(result)
             return 0
 
         elif arg == '--procurement' and len(sys.argv) > 2:
@@ -157,7 +197,9 @@ def main():
             agent = ProcurementAgent()
             print(f"\nQuery: {query}\n")
             print("-" * 60)
-            print(agent.run(query))
+            with Spinner("Reviewing reinforcement data"):
+                result = agent.run(query)
+            print(result)
             return 0
 
         elif arg == '--scheduling' and len(sys.argv) > 2:
@@ -167,7 +209,9 @@ def main():
             agent = SchedulingAgent()
             print(f"\nQuery: {query}\n")
             print("-" * 60)
-            print(agent.run(query))
+            with Spinner("Computing schedule"):
+                result = agent.run(query)
+            print(result)
             return 0
 
         elif arg in ['--help', '-h']:
@@ -186,7 +230,9 @@ def main():
             agent = GroupingOptimizerAgent()
             print(f"\nQuery: {query}\n")
             print("-" * 60)
-            print(agent.run(query))
+            with Spinner("Analyzing floor groupings"):
+                result = agent.run(query)
+            print(result)
             return 0
 
     # Interactive mode with agent selection

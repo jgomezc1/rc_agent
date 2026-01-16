@@ -535,8 +535,41 @@ def grouping_optimizer_v1(
         # Impute any missing values
         df = optimizer.impute_missing_values(df)
 
-        # Run optimization
-        all_scenarios = optimizer.optimize(df, candidate_k_values)
+        # SAFEGUARD: Limit k values to prevent exponential blow-up
+        # For n levels, partitions grow as C(n-1, k-1) which explodes for large k
+        MAX_K = 6  # Maximum groups to prevent performance issues
+        MAX_PARTITIONS = 50000  # Maximum partitions to evaluate
+
+        n_levels = len(df)
+        filtered_k_values = []
+        estimated_partitions = 0
+
+        for k in sorted(candidate_k_values):
+            if k > MAX_K:
+                logger.warning(f"Skipping k={k}: exceeds maximum allowed ({MAX_K}) for performance")
+                continue
+            if k > n_levels:
+                logger.warning(f"Skipping k={k}: exceeds number of levels ({n_levels})")
+                continue
+
+            # Estimate partitions for this k: C(n-1, k-1)
+            from math import comb
+            k_partitions = comb(n_levels - 1, k - 1)
+
+            if estimated_partitions + k_partitions > MAX_PARTITIONS:
+                logger.warning(f"Skipping k={k}: would exceed max partition limit ({MAX_PARTITIONS})")
+                continue
+
+            filtered_k_values.append(k)
+            estimated_partitions += k_partitions
+
+        if not filtered_k_values:
+            return {"error": f"No valid k values after filtering. Requested: {candidate_k_values}, max allowed: {MAX_K}, levels: {n_levels}"}
+
+        logger.info(f"Optimizing with k={filtered_k_values}, estimated partitions: {estimated_partitions}")
+
+        # Run optimization with filtered k values
+        all_scenarios = optimizer.optimize(df, filtered_k_values)
 
         # Get top N scenarios
         top_scenarios = all_scenarios[:top_n]
@@ -632,13 +665,14 @@ End with a 2-3 line recommendation on the trade-off between steel savings and co
             prompt=self.SYSTEM_PROMPT
         )
 
-    def run(self, user_input: str, chat_history: Optional[List] = None) -> str:
+    def run(self, user_input: str, chat_history: Optional[List] = None, max_iterations: int = 15) -> str:
         """
         Execute the agent with user input.
 
         Args:
             user_input: User's request/query
             chat_history: Optional conversation history
+            max_iterations: Maximum number of agent iterations to prevent infinite loops (default: 15)
 
         Returns:
             Agent's response string
@@ -649,8 +683,11 @@ End with a 2-3 line recommendation on the trade-off between steel savings and co
             messages.extend(chat_history)
         messages.append(HumanMessage(content=user_input))
 
-        # Invoke the agent
-        result = self.agent.invoke({"messages": messages})
+        # Invoke the agent with recursion limit to prevent infinite loops
+        result = self.agent.invoke(
+            {"messages": messages},
+            config={"recursion_limit": max_iterations}
+        )
 
         # Extract the final response
         if result.get("messages"):
