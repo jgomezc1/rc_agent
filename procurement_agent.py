@@ -3,11 +3,7 @@ Procurement Agent v1 - Reinforcement Data Review & Procurement Planning
 
 This module implements an AI agent that reviews reinforcement solution files
 and assists with procurement planning using LangChain Expression Language (LCEL)
-<<<<<<< HEAD
 with Anthropic as the LLM.
-=======
-with OpenAI as the LLM.
->>>>>>> e6b602646c38914ead8d3859631046791e2adfcd
 """
 
 import os
@@ -20,11 +16,7 @@ import numpy as np
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-<<<<<<< HEAD
 from langchain_anthropic import ChatAnthropic
-=======
-from langchain_openai import ChatOpenAI
->>>>>>> e6b602646c38914ead8d3859631046791e2adfcd
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
@@ -1816,15 +1808,9 @@ Example PDF requests:
 When a PDF is generated successfully, inform the user of the file path.
 If PDF generation fails, explain the error and still provide the data summary."""
 
-<<<<<<< HEAD
     def __init__(self, model_name: str = "claude-sonnet-4-6", temperature: float = 0.0):
         """Initialize the agent."""
         self.llm = ChatAnthropic(
-=======
-    def __init__(self, model_name: str = "gpt-4.1-mini", temperature: float = 0.0):
-        """Initialize the agent."""
-        self.llm = ChatOpenAI(
->>>>>>> e6b602646c38914ead8d3859631046791e2adfcd
             model=model_name,
             temperature=temperature
         )
