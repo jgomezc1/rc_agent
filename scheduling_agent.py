@@ -13,16 +13,14 @@ Usage:
 """
 
 import os
+import re
 import json
 import logging
 from typing import Dict, Any, List, Optional
+from datetime import datetime
 
 from dotenv import load_dotenv
-<<<<<<< HEAD
 from langchain_anthropic import ChatAnthropic
-=======
-from langchain_openai import ChatOpenAI
->>>>>>> e6b602646c38914ead8d3859631046791e2adfcd
 
 # Load environment variables from .env file
 load_dotenv()
@@ -40,6 +38,14 @@ from floor_schedule import (
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Plotly import for interactive Gantt chart (optional dependency)
+try:
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    logger.warning("plotly not installed. Gantt chart generation will be disabled.")
+
 
 # =============================================================================
 # Defaults
@@ -47,6 +53,194 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_WORK_PACKAGES_PATH = "data/work_packages.json"
 DEFAULT_FLOOR_SCHEDULE_PATH = "data/floor_schedule.json"
+
+
+# =============================================================================
+# Gantt Chart Helpers
+# =============================================================================
+
+def _floor_sort_key(floor_id: str):
+    """Sort floors: PISO 2..23 numerically, then CUBIERTA, then CUB. MÁQUINAS."""
+    fid = floor_id.strip().upper()
+    m = re.match(r"PISO\s+(\d+)", fid, re.IGNORECASE)
+    if m:
+        return (0, int(m.group(1)))
+    if "CUBIERTA" in fid and "MÁQ" not in fid and "MAQ" not in fid:
+        return (1, 0)
+    if "CUB" in fid and ("MÁQ" in fid or "MAQ" in fid):
+        return (2, 0)
+    return (3, 0)
+
+
+WORK_TYPE_COLORS = {
+    "rebar_beams":   "#3498db",  # blue
+    "rebar_columns": "#e67e22",  # orange
+    "rebar_walls":   "#2ecc71",  # green
+    "rebar_slabs":   "#9b59b6",  # purple
+    "rebar_unknown": "#95a5a6",  # grey
+}
+
+WORK_TYPE_LABELS = {
+    "rebar_beams":   "Beams",
+    "rebar_columns": "Columns",
+    "rebar_walls":   "Walls",
+    "rebar_slabs":   "Slabs",
+    "rebar_unknown": "Unknown",
+}
+
+
+# =============================================================================
+# Gantt Chart Generator
+# =============================================================================
+
+class GanttChartGenerator:
+    """Generates an interactive Gantt chart HTML from a floor schedule using Plotly."""
+
+    def __init__(self, output_dir: str = "reports"):
+        self.output_dir = output_dir
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+    def _sort_floors(self, floors: List[Dict]) -> List[Dict]:
+        """Return floors sorted bottom-up (PISO 2 first, CUB. MÁQUINAS last)."""
+        return sorted(floors, key=lambda f: _floor_sort_key(f.get("floor_id", "")))
+
+    def _compute_cumulative_starts(self, sorted_floors: List[Dict]) -> List[Dict]:
+        """Add cumulative_start_day to each floor (sequential scheduling)."""
+        cum = 0.0
+        result = []
+        for f in sorted_floors:
+            entry = dict(f)
+            entry["cumulative_start_day"] = cum
+            cum += f.get("floor_duration_days", 0.0)
+            result.append(entry)
+        return result
+
+    def generate_html(self, schedule: Dict, filename: str = None) -> str:
+        """Generate an interactive Gantt chart HTML and return the file path."""
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            project_id = schedule.get("project_id", "project")
+            safe_name = re.sub(r"[^\w\-]", "_", str(project_id))
+            filename = f"gantt_chart_{safe_name}_{timestamp}.html"
+
+        html_path = os.path.join(self.output_dir, filename)
+
+        floors_raw = schedule.get("floors", [])
+        sorted_floors = self._sort_floors(floors_raw)
+        floors = self._compute_cumulative_starts(sorted_floors)
+
+        # Floor IDs for Y-axis (bottom-up order matches list order)
+        floor_ids = [f.get("floor_id", "?") for f in floors]
+
+        # Build one trace per work type
+        # Collect which work types appear so we only add those traces
+        seen_types = set()
+        for f in floors:
+            for p in f.get("packages", []):
+                seen_types.add(p.get("work_type", "rebar_unknown"))
+
+        fig = go.Figure()
+
+        work_type_order = ["rebar_beams", "rebar_columns", "rebar_walls", "rebar_slabs", "rebar_unknown"]
+
+        for wt in work_type_order:
+            if wt not in seen_types:
+                continue
+
+            bases = []
+            widths = []
+            y_labels = []
+            hover_texts = []
+
+            for f in floors:
+                floor_id = f.get("floor_id", "?")
+                start_day = f.get("cumulative_start_day", 0.0)
+                packages = f.get("packages", [])
+
+                pkg = next((p for p in packages if p.get("work_type") == wt), None)
+                if pkg is None:
+                    continue
+
+                duration = pkg.get("duration_days", 0.0)
+                crew_hours = pkg.get("crew_hours_total", 0.0)
+                tonnage = pkg.get("total_weight_tonf", 0.0)
+                n_crews = pkg.get("n_crews_assigned", 0)
+
+                bases.append(start_day)
+                widths.append(duration)
+                y_labels.append(floor_id)
+                hover_texts.append(
+                    f"<b>{floor_id}</b><br>"
+                    f"Work type: {WORK_TYPE_LABELS.get(wt, wt)}<br>"
+                    f"Duration: {duration:.2f} days<br>"
+                    f"Crew-hours: {crew_hours:.1f}<br>"
+                    f"Tonnage: {tonnage:.2f} tonf<br>"
+                    f"Crews: {n_crews}"
+                )
+
+            fig.add_trace(go.Bar(
+                y=y_labels,
+                x=widths,
+                base=bases,
+                orientation="h",
+                name=WORK_TYPE_LABELS.get(wt, wt),
+                marker_color=WORK_TYPE_COLORS.get(wt, "#95a5a6"),
+                hovertext=hover_texts,
+                hoverinfo="text",
+            ))
+
+        # Summary stats for subtitle
+        hours_per_day = schedule.get("hours_per_day", 8.0)
+        crews = schedule.get("crews_per_work_type", {})
+        crew_str = ", ".join(f"{WORK_TYPE_LABELS.get(k, k)}: {v}" for k, v in sorted(crews.items()))
+        total_days = sum(f.get("floor_duration_days", 0) for f in floors)
+
+        fig.update_layout(
+            title=dict(
+                text=f"Rebar Installation Gantt Chart — {schedule.get('project_id', 'Project')}",
+                font=dict(size=20, color="#1a5f7a"),
+            ),
+            xaxis_title="Project Days (cumulative)",
+            yaxis=dict(
+                categoryorder="array",
+                categoryarray=floor_ids,
+                title="",
+            ),
+            barmode="overlay",
+            bargap=0.3,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="left",
+                x=0,
+            ),
+            template="plotly_white",
+            height=max(400, len(floors) * 35 + 150),
+            annotations=[
+                dict(
+                    text=f"{len(floors)} floors | {hours_per_day} hrs/day | Crews: {crew_str} | Total: {total_days:.1f} days",
+                    xref="paper", yref="paper",
+                    x=0.5, y=-0.12,
+                    showarrow=False,
+                    font=dict(size=11, color="#636e72"),
+                ),
+                dict(
+                    text=f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M')} by RC Agent — Scheduling Module",
+                    xref="paper", yref="paper",
+                    x=1.0, y=-0.18,
+                    showarrow=False,
+                    font=dict(size=9, color="#b2bec3"),
+                    xanchor="right",
+                ),
+            ],
+            margin=dict(l=120, r=40, t=80, b=100),
+        )
+
+        fig.write_html(html_path, full_html=True, include_plotlyjs=True)
+        logger.info(f"Gantt chart HTML saved to: {html_path}")
+        return html_path
 
 
 # =============================================================================
@@ -177,6 +371,96 @@ def load_floor_schedule_tool(
         return {"error": str(e)}
 
 
+@tool
+def generate_gantt_chart(
+    work_packages_path: str = DEFAULT_WORK_PACKAGES_PATH,
+    floor_schedule_path: str = DEFAULT_FLOOR_SCHEDULE_PATH,
+    hours_per_day: float = DEFAULT_HOURS_PER_DAY,
+    rebar_beams_crews: int = 2,
+    rebar_columns_crews: int = 1,
+    rebar_walls_crews: int = 1,
+    rebar_slabs_crews: int = 2,
+    rebar_unknown_crews: int = 1,
+    use_existing_schedule: bool = True,
+) -> Dict[str, Any]:
+    """
+    Generate an interactive HTML Gantt chart showing the rebar installation timeline across floors.
+
+    The chart shows each floor as a horizontal bar on the Y-axis, with the X-axis
+    representing cumulative project days. Bars are color-coded by work type
+    (beams=blue, columns=orange, walls=green, slabs=purple).
+    The HTML file can be opened in any browser with zoom, pan, and hover tooltips.
+
+    Args:
+        work_packages_path: Path to work_packages.json (used if computing fresh schedule).
+                           Default: "data/work_packages.json"
+        floor_schedule_path: Path to floor_schedule.json (used if use_existing_schedule=True).
+                            Default: "data/floor_schedule.json"
+        hours_per_day: Working hours per day. Default: 8.0
+        rebar_beams_crews: Number of crews for beam rebar work. Default: 2
+        rebar_columns_crews: Number of crews for column rebar work. Default: 1
+        rebar_walls_crews: Number of crews for wall rebar work. Default: 1
+        rebar_slabs_crews: Number of crews for slab rebar work. Default: 2
+        rebar_unknown_crews: Number of crews for unknown rebar work. Default: 1
+        use_existing_schedule: If True, load floor_schedule.json; if False, compute fresh.
+                              Default: True
+
+    Returns:
+        Dictionary with html_path, chart_generated (bool), total_project_days, n_floors,
+        or {"error": "..."} if something fails.
+    """
+    if not PLOTLY_AVAILABLE:
+        return {"error": "plotly is not installed. Install it with: pip install plotly"}
+
+    try:
+        schedule = None
+
+        if use_existing_schedule and os.path.exists(floor_schedule_path):
+            with open(floor_schedule_path, "r", encoding="utf-8") as f:
+                schedule = json.load(f)
+        else:
+            # Compute fresh schedule from work packages
+            if not os.path.exists(work_packages_path):
+                return {"error": f"File not found: {work_packages_path}"}
+
+            with open(work_packages_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            crews_per_work_type = DEFAULT_CREWS_PER_WORK_TYPE.copy()
+            crews_per_work_type["rebar_beams"] = max(1, int(rebar_beams_crews or 1))
+            crews_per_work_type["rebar_columns"] = max(1, int(rebar_columns_crews or 1))
+            crews_per_work_type["rebar_walls"] = max(1, int(rebar_walls_crews or 1))
+            crews_per_work_type["rebar_slabs"] = max(1, int(rebar_slabs_crews or 1))
+            crews_per_work_type["rebar_unknown"] = max(1, int(rebar_unknown_crews or 1))
+
+            if hours_per_day is None or hours_per_day <= 0:
+                hours_per_day = DEFAULT_HOURS_PER_DAY
+
+            schedule = build_floor_schedule(data, crews_per_work_type, hours_per_day)
+
+        if schedule is None:
+            return {"error": "Could not load or compute a floor schedule."}
+
+        generator = GanttChartGenerator()
+        html_path = generator.generate_html(schedule)
+
+        floors = schedule.get("floors", [])
+        sorted_floors = sorted(floors, key=lambda f: _floor_sort_key(f.get("floor_id", "")))
+        total_project_days = sum(f.get("floor_duration_days", 0.0) for f in sorted_floors)
+
+        return {
+            "html_path": html_path,
+            "chart_generated": True,
+            "total_project_days": round(total_project_days, 2),
+            "n_floors": len(floors),
+            "message": f"Interactive Gantt chart saved to {html_path}. Open in a browser for zoom, pan, and hover tooltips.",
+        }
+
+    except Exception as e:
+        logger.error(f"Error generating Gantt chart: {e}")
+        return {"error": str(e)}
+
+
 # =============================================================================
 # Scheduling Agent
 # =============================================================================
@@ -213,6 +497,14 @@ You work with **work packages** and **floor schedules** generated from ProDet re
    - Loads and summarizes an existing floor_schedule.json
    - Use this to inspect current schedule without recomputing
 
+3. **generate_gantt_chart**
+   - Generates an interactive HTML Gantt chart showing the rebar installation timeline across all floors
+   - Bars are color-coded by work type (beams=blue, columns=orange, walls=green, slabs=purple)
+   - Floors are sorted bottom-up (PISO 2 at bottom, CUB. MÁQUINAS at top)
+   - The HTML file can be opened in any browser with zoom, pan, and hover tooltips
+   - Can use an existing floor_schedule.json or compute a fresh one
+   - Use this when the user asks for a visual timeline, Gantt chart, or chart of the schedule
+
 == USAGE GUIDELINES ==
 
 - If user asks for **current floor durations**, first try `load_floor_schedule_tool`
@@ -221,6 +513,12 @@ You work with **work packages** and **floor schedules** generated from ProDet re
 - If user asks a **what-if question** (change crews or hours/day):
   - Call `compute_floor_schedule_tool` with the new parameters
   - Compare results to the baseline if available
+
+- If user asks for a **Gantt chart**, **visual timeline**, or **chart**:
+  - Call `generate_gantt_chart` (defaults use existing schedule)
+  - For what-if Gantt charts, set `use_existing_schedule=False` and pass crew counts
+  - Report the HTML file path and total project duration
+  - Mention they can open it in a browser for interactive zoom, pan, and hover tooltips
 
 - Always **explain results clearly**:
   - Per-floor duration
@@ -280,21 +578,17 @@ Present results in clear, structured format:
 - "What if I use 3 crews for beams instead of 2?"
 - "How long would it take with 10-hour workdays?"
 - "Compare current schedule with double the beam crews"
+- "Generate a Gantt chart for the current schedule"
+- "Create a Gantt chart with 3 beam crews and 10-hour days"
 """
 
-<<<<<<< HEAD
     def __init__(self, model_name: str = "claude-sonnet-4-6", temperature: float = 0.0):
         """Initialize the scheduling agent."""
         self.llm = ChatAnthropic(
-=======
-    def __init__(self, model_name: str = "gpt-4.1-mini", temperature: float = 0.0):
-        """Initialize the scheduling agent."""
-        self.llm = ChatOpenAI(
->>>>>>> e6b602646c38914ead8d3859631046791e2adfcd
             model=model_name,
             temperature=temperature,
         )
-        self.tools = [compute_floor_schedule_tool, load_floor_schedule_tool]
+        self.tools = [compute_floor_schedule_tool, load_floor_schedule_tool, generate_gantt_chart]
 
         self.agent = create_react_agent(
             self.llm,

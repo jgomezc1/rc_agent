@@ -49,6 +49,8 @@ venv_linux/
 # results
 *.xlsx
 *.json
+*.html
+*.pdf
 
 # Testing
 .pytest_cache/
