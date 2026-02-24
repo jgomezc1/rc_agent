@@ -18,7 +18,11 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from dotenv import load_dotenv
+<<<<<<< HEAD
 from langchain_anthropic import ChatAnthropic
+=======
+from langchain_openai import ChatOpenAI
+>>>>>>> e6b602646c38914ead8d3859631046791e2adfcd
 
 # Load environment variables from .env file
 load_dotenv()
@@ -278,9 +282,15 @@ Present results in clear, structured format:
 - "Compare current schedule with double the beam crews"
 """
 
+<<<<<<< HEAD
     def __init__(self, model_name: str = "claude-sonnet-4-6", temperature: float = 0.0):
         """Initialize the scheduling agent."""
         self.llm = ChatAnthropic(
+=======
+    def __init__(self, model_name: str = "gpt-4.1-mini", temperature: float = 0.0):
+        """Initialize the scheduling agent."""
+        self.llm = ChatOpenAI(
+>>>>>>> e6b602646c38914ead8d3859631046791e2adfcd
             model=model_name,
             temperature=temperature,
         )

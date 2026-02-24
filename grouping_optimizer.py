@@ -3,7 +3,11 @@ Grouping Optimizer v1 - Floor Grouping Optimization Agent
 
 This module implements an AI agent that solves floor-grouping problems for
 geometrically identical stories using LangChain Expression Language (LCEL)
+<<<<<<< HEAD
 with Anthropic as the LLM.
+=======
+with OpenAI as the LLM.
+>>>>>>> e6b602646c38914ead8d3859631046791e2adfcd
 
 The optimization logic is deterministic (Python-based), while the LLM handles
 natural language understanding, tool invocation, and result explanation.
@@ -18,7 +22,11 @@ import pandas as pd
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
+<<<<<<< HEAD
 from langchain_anthropic import ChatAnthropic
+=======
+from langchain_openai import ChatOpenAI
+>>>>>>> e6b602646c38914ead8d3859631046791e2adfcd
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
@@ -650,9 +658,15 @@ After receiving results, present a clear summary with:
 
 End with a 2-3 line recommendation on the trade-off between steel savings and construction efficiency."""
 
+<<<<<<< HEAD
     def __init__(self, model_name: str = "claude-sonnet-4-6", temperature: float = 0.0):
         """Initialize the agent with specified Anthropic model."""
         self.llm = ChatAnthropic(
+=======
+    def __init__(self, model_name: str = "gpt-4.1-mini", temperature: float = 0.0):
+        """Initialize the agent with specified OpenAI model."""
+        self.llm = ChatOpenAI(
+>>>>>>> e6b602646c38914ead8d3859631046791e2adfcd
             model=model_name,
             temperature=temperature
         )
