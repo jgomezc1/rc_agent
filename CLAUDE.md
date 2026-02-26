@@ -20,6 +20,7 @@ python cli.py
 python cli.py --grouping "Optimize from PISO 5 to PISO 15 with k=2,3,4"
 python cli.py --procurement "Review the reinforcement solution file"
 python cli.py --scheduling "What is the duration for each floor?"
+python cli.py --prodet "What projects are available?"
 
 # Run full data pipeline (generates all JSON artifacts from Excel input)
 python run_rebar_pipeline.py -x data/reinforcement_solution.xlsx
@@ -50,13 +51,14 @@ reinforcement_solution.xlsx
   → floor_schedule.py         → floor_schedule.json
 ```
 
-**Layer 2 — LLM Agents:** Three specialized ReAct agents (LangGraph `create_react_agent`) that use deterministic Python functions as tools:
+**Layer 2 — LLM Agents:** Four specialized ReAct agents (LangGraph `create_react_agent`) that use deterministic Python functions as tools:
 
 | Agent | Module | Purpose | Key Tools |
 |-------|--------|---------|-----------|
 | Grouping Optimizer | `grouping_optimizer.py` | Minimize steel via optimal floor groupings | `inspect_data_file`, `grouping_optimizer_v1` |
 | Procurement | `procurement_agent.py` | Review reinforcement files, generate bar lists & PDF reports | `load_reinforcement_file`, `list_available_floors`, `get_floor_data`, `analyze_bars_by_diameter`, `analyze_bars_by_shape`, `generate_pdf_report` |
 | Scheduling | `scheduling_agent.py` | Plan rebar installation schedules | `compute_floor_schedule_tool`, `analyze_bottleneck`, `compare_scenarios` |
+| ProDet Runner | `prodet_agent.py` | Run ProDet, copy output, run data pipeline | `list_projects`, `inspect_project`, `run_prodet`, `copy_output_to_rc_agent`, `run_data_pipeline` |
 
 ### Unified Agent Pattern
 
@@ -90,5 +92,8 @@ JSON artifacts in `data/` are the bridge between the pipeline and agents. The pi
 
 - `ANTHROPIC_API_KEY` in `.env` (required)
 - `CLAUDE_MODEL` in `.env` (optional, defaults to `claude-sonnet-4-6`)
+- `PRODET_ROOT` in `.env` — path to ProDes-Core source (Windows or WSL paths accepted, auto-converted)
+- `PRODET_PROJECTS` in `.env` — path to project folders (Windows or WSL paths accepted, auto-converted)
+- `PRODET_CONDA_ENV` in `.env` — conda environment name for ProDet (default: `ProDet-py39`)
 - Default crew allocations in `scheduling_agent.py`: beams=2, columns=1, walls=1, slabs=2
 - Scheduling formulas: `duration_days = crew_hours / (n_crews × hours_per_day)`, floor duration = max across work types

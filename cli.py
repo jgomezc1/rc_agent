@@ -7,6 +7,7 @@ Usage:
     python cli.py --grouping "query"        # Grouping optimizer single query
     python cli.py --procurement "query"     # Procurement agent single query
     python cli.py --scheduling "query"      # Scheduling agent single query
+    python cli.py --prodet "query"          # ProDet runner single query
 """
 
 import sys
@@ -106,6 +107,18 @@ AGENTS = {
             'Which floor is the bottleneck?',
             'What if I use 3 crews for beams instead of 2?',
             'How long would it take with 10-hour workdays?'
+        ]
+    },
+    '4': {
+        'name': 'ProDet Runner',
+        'description': 'Run ProDet, copy output, and process the data pipeline',
+        'module': 'prodet_agent',
+        'class': 'ProDetAgent',
+        'examples': [
+            'What projects are available?',
+            'Inspect the mokara project',
+            'Run ProDet for mokara and process the output',
+            'Run the data pipeline on the current xlsx'
         ]
     }
 }
@@ -214,12 +227,25 @@ def main():
             print(result)
             return 0
 
+        elif arg == '--prodet' and len(sys.argv) > 2:
+            from prodet_agent import ProDetAgent
+            query = " ".join(sys.argv[2:])
+            print("Initializing ProDet Runner...")
+            agent = ProDetAgent()
+            print(f"\nQuery: {query}\n")
+            print("-" * 60)
+            with Spinner("Running ProDet workflow"):
+                result = agent.run(query)
+            print(result)
+            return 0
+
         elif arg in ['--help', '-h']:
             print("Usage:")
             print("  python cli.py                           # Interactive mode")
             print("  python cli.py --grouping \"query\"        # Grouping optimizer")
             print("  python cli.py --procurement \"query\"     # Procurement agent")
             print("  python cli.py --scheduling \"query\"      # Scheduling agent")
+            print("  python cli.py --prodet \"query\"          # ProDet runner")
             return 0
 
         else:
@@ -254,13 +280,13 @@ def main():
             continue
 
         # Load selected agent
-        print(f"\nInitializing {AGENTS[choice]['name']} (connecting to OpenAI)...")
+        print(f"\nInitializing {AGENTS[choice]['name']}...")
         try:
             agent, agent_info = load_agent(choice)
             print("Agent ready.")
         except Exception as e:
             print(f"{YELLOW}Error initializing agent:{RESET} {e}")
-            print("Make sure OPENAI_API_KEY is set in your .env file.")
+            print("Make sure ANTHROPIC_API_KEY is set in your .env file.")
             continue
 
         # Run interactive session
