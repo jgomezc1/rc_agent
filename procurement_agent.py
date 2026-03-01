@@ -748,7 +748,7 @@ class ReinforcementFileReviewer:
 
 @tool
 def review_reinforcement_file(
-    file_path: str = "data/reinforcement_solution.xlsx"
+    file_path: str = "projects/reinforcement_solution.xlsx"
 ) -> Dict[str, Any]:
     """
     Review a reinforcement solution file for completeness and clarity.
@@ -764,7 +764,7 @@ def review_reinforcement_file(
 
     Args:
         file_path: Path to the reinforcement solution file (.xlsx or .csv)
-                  Default: "data/reinforcement_solution.xlsx"
+                  Default: "projects/reinforcement_solution.xlsx"
 
     Returns:
         Dictionary containing:
@@ -789,12 +789,12 @@ def review_reinforcement_file(
 
 
 @tool
-def list_data_files(directory: str = "data") -> Dict[str, Any]:
+def list_data_files(directory: str = "projects") -> Dict[str, Any]:
     """
     List available data files in a directory.
 
     Args:
-        directory: Directory to search (default: "data")
+        directory: Directory to search (default: "projects")
 
     Returns:
         Dictionary with list of Excel/CSV files found
@@ -830,7 +830,7 @@ class ProcurementReportGenerator:
     Generates detailed procurement reports for specific floors or floor ranges.
     """
 
-    def __init__(self, file_path: str = "data/reinforcement_solution.xlsx"):
+    def __init__(self, file_path: str = "projects/reinforcement_solution.xlsx"):
         self.file_path = file_path
         self.xlsx = None
         self._load_file()
@@ -1553,7 +1553,7 @@ class PDFReportGenerator:
 def generate_procurement_report(
     start_floor: str,
     end_floor: str = None,
-    file_path: str = "data/reinforcement_solution.xlsx",
+    file_path: str = "projects/reinforcement_solution.xlsx",
     generate_pdf: bool = False
 ) -> Dict[str, Any]:
     """
@@ -1572,7 +1572,7 @@ def generate_procurement_report(
         end_floor: Ending floor name for a range report (e.g., "PISO 11").
                   If provided, report includes all floors from start_floor to end_floor.
         file_path: Path to the reinforcement solution file.
-                  Default: "data/reinforcement_solution.xlsx"
+                  Default: "projects/reinforcement_solution.xlsx"
         generate_pdf: If True, generates a PDF report file in the 'reports' folder.
                      Default: False
 
@@ -1615,7 +1615,7 @@ def generate_procurement_report(
 
 
 @tool
-def list_available_floors(file_path: str = "data/reinforcement_solution.xlsx") -> Dict[str, Any]:
+def list_available_floors(file_path: str = "projects/reinforcement_solution.xlsx") -> Dict[str, Any]:
     """
     List all available floors in the reinforcement solution file.
 
@@ -1623,7 +1623,7 @@ def list_available_floors(file_path: str = "data/reinforcement_solution.xlsx") -
 
     Args:
         file_path: Path to the reinforcement solution file.
-                  Default: "data/reinforcement_solution.xlsx"
+                  Default: "projects/reinforcement_solution.xlsx"
 
     Returns:
         Dictionary containing:
@@ -1667,7 +1667,7 @@ AVAILABLE TOOLS:
 4. generate_procurement_report - Generate detailed procurement report for specific floor(s)
 
 IMPORTANT:
-- If the user doesn't specify a file, use "data/reinforcement_solution.xlsx" as default
+- If the user doesn't specify a file, use "projects/reinforcement_solution.xlsx" as default
 - If the file doesn't exist, use list_data_files to show available files
 - Always explain issues clearly and provide actionable recommendations
 
@@ -1806,7 +1806,13 @@ Example PDF requests:
 - "Export the report for PISO 10 as PDF"
 
 When a PDF is generated successfully, inform the user of the file path.
-If PDF generation fails, explain the error and still provide the data summary."""
+If PDF generation fails, explain the error and still provide the data summary.
+
+== PROJECT-SPECIFIC DATA ==
+
+If the user mentions a project name or the message contains [Active project: X],
+use project-specific paths: "projects/<project_name>/reinforcement_solution.xlsx".
+If no project is specified, fall back to "projects/reinforcement_solution.xlsx"."""
 
     def __init__(self, model_name: str = "claude-sonnet-4-6", temperature: float = 0.0):
         """Initialize the agent."""
@@ -1854,7 +1860,7 @@ If PDF generation fails, explain the error and still provide the data summary.""
 # Standalone Functions
 # =============================================================================
 
-def run_file_review(file_path: str = "data/reinforcement_solution.xlsx") -> Dict[str, Any]:
+def run_file_review(file_path: str = "projects/reinforcement_solution.xlsx") -> Dict[str, Any]:
     """Run file review directly without LLM."""
     return review_reinforcement_file.invoke({"file_path": file_path})
 
@@ -1950,7 +1956,7 @@ if __name__ == "__main__":
     print("Procurement Agent - File Review")
     print("=" * 40)
 
-    file_path = sys.argv[1] if len(sys.argv) > 1 else "data/reinforcement_solution.xlsx"
+    file_path = sys.argv[1] if len(sys.argv) > 1 else "projects/reinforcement_solution.xlsx"
 
     result = run_file_review(file_path)
     print(format_review_summary(result))

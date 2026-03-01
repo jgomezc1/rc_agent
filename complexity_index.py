@@ -10,8 +10,8 @@ Usage:
     python complexity_index.py [-i INPUT] [-o OUTPUT]
 
     Defaults:
-        INPUT:  data/elements.json
-        OUTPUT: data/elements_with_ci.json
+        INPUT:  projects/elements.json
+        OUTPUT: projects/elements_with_ci.json
 """
 
 import sys
@@ -239,13 +239,13 @@ def main():
     )
     parser.add_argument(
         "-i", "--input",
-        default="data/elements.json",
-        help="Path to input JSON file (default: data/elements.json)"
+        default="projects/elements.json",
+        help="Path to input JSON file (default: projects/elements.json)"
     )
     parser.add_argument(
         "-o", "--output",
-        default="data/elements_with_ci.json",
-        help="Path to output JSON file (default: data/elements_with_ci.json)"
+        default="projects/elements_with_ci.json",
+        help="Path to output JSON file (default: projects/elements_with_ci.json)"
     )
 
     args = parser.parse_args()

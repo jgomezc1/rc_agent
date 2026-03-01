@@ -64,3 +64,6 @@ tmp/
 
 # results files
 logistics_outputs/
+
+# Project-specific files (configs, binaries, pipeline artifacts)
+projects/

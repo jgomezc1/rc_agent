@@ -623,11 +623,11 @@ AVAILABLE TOOLS:
 IMPORTANT:
 - If the user asks about file contents, levels, or data - use inspect_data_file
 - When the user provides enough information to run an optimization, IMMEDIATELY call grouping_optimizer_v1. Do NOT ask for confirmation.
-- If the user does not specify a file path, USE "data/summary.xlsx" as the default file.
+- If the user does not specify a file path, USE "projects/summary.xlsx" as the default file.
 - If the user does not specify start/end levels, first use inspect_data_file to discover available levels, then use the full range.
 
 DEFAULT VALUES (use these if user doesn't specify):
-- file_path: "data/summary.xlsx"
+- file_path: "projects/summary.xlsx"
 - start_level: Use inspect_data_file to find available levels, or ask user
 - end_level: Use inspect_data_file to find available levels, or ask user
 - days_first_in_group: 10 (workdays for first level in a group)

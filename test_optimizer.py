@@ -21,7 +21,7 @@ def test_data_loading():
     print("=" * 60)
 
     optimizer = GroupingOptimizer()
-    file_path = "data/summary.xlsx"
+    file_path = "projects/summary.xlsx"
 
     # Load data
     df = optimizer.load_data(file_path)
@@ -83,7 +83,7 @@ def test_optimization():
     print("TEST: Full Optimization")
     print("=" * 60)
 
-    file_path = "data/summary.xlsx"
+    file_path = "projects/summary.xlsx"
 
     # Run optimization
     results = run_optimization(

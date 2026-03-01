@@ -54,8 +54,8 @@ def main() -> None:
     parser.add_argument(
         "--data-dir",
         "-d",
-        default="data",
-        help="Directory where JSON artifacts will be written (default: ./data).",
+        default="projects",
+        help="Directory where JSON artifacts will be written (default: ./projects).",
     )
     parser.add_argument(
         "--hours-per-day",

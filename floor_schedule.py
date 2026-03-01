@@ -10,8 +10,8 @@ Usage:
     python floor_schedule.py [-i INPUT] [-o OUTPUT] [--hours-per-day HPD]
 
     Defaults:
-        INPUT:  data/work_packages.json
-        OUTPUT: data/floor_schedule.json
+        INPUT:  projects/work_packages.json
+        OUTPUT: projects/floor_schedule.json
         HPD:    8.0
 """
 
@@ -185,13 +185,13 @@ def main():
     )
     parser.add_argument(
         "-i", "--input",
-        default="data/work_packages.json",
-        help="Path to input JSON file (default: data/work_packages.json)"
+        default="projects/work_packages.json",
+        help="Path to input JSON file (default: projects/work_packages.json)"
     )
     parser.add_argument(
         "-o", "--output",
-        default="data/floor_schedule.json",
-        help="Path to output JSON file (default: data/floor_schedule.json)"
+        default="projects/floor_schedule.json",
+        help="Path to output JSON file (default: projects/floor_schedule.json)"
     )
     parser.add_argument(
         "--hours-per-day", "-hpd",

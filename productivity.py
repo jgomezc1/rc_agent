@@ -10,8 +10,8 @@ Usage:
     python productivity.py [-i INPUT] [-o OUTPUT]
 
     Defaults:
-        INPUT:  data/elements_with_ci.json
-        OUTPUT: data/elements_with_prod.json
+        INPUT:  projects/elements_with_ci.json
+        OUTPUT: projects/elements_with_prod.json
 """
 
 import sys
@@ -175,13 +175,13 @@ def main():
     )
     parser.add_argument(
         "-i", "--input",
-        default="data/elements_with_ci.json",
-        help="Path to input JSON file (default: data/elements_with_ci.json)"
+        default="projects/elements_with_ci.json",
+        help="Path to input JSON file (default: projects/elements_with_ci.json)"
     )
     parser.add_argument(
         "-o", "--output",
-        default="data/elements_with_prod.json",
-        help="Path to output JSON file (default: data/elements_with_prod.json)"
+        default="projects/elements_with_prod.json",
+        help="Path to output JSON file (default: projects/elements_with_prod.json)"
     )
 
     args = parser.parse_args()

@@ -5,7 +5,7 @@ ProDet Agent - Orchestrates ProDet execution, output transfer, and data pipeline
 This module provides an LLM agent that automates the workflow:
   1. List/inspect ProDet projects
   2. Run ProDet to generate reinforcement output
-  3. Copy the output .xlsx into rc_agent/data/
+  3. Copy the output .xlsx into rc_agent/projects/
   4. Run the rebar data pipeline to produce JSON artifacts
 
 Usage:
@@ -20,6 +20,7 @@ import sys
 import shutil
 import logging
 import subprocess
+import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
@@ -37,45 +38,47 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# Path normalisation — allow the same .env to work on both WSL and native Win
+# Path helpers (shared module)
 # =============================================================================
 
-def _normalize_path(path: str) -> str:
-    """Convert between WSL (/mnt/c/...) and Windows (C:\\...) paths as needed."""
-    if sys.platform == "win32":
-        # Running on native Windows (e.g. Anaconda Prompt)
-        # Convert WSL-style /mnt/X/... to X:\...
-        if path.startswith("/mnt/") and len(path) > 5 and path[5] == "/":
-            drive = path[5 - 1].upper()
-            return drive + ":\\" + path[6:].replace("/", "\\")
-    else:
-        # Running on Linux / WSL
-        # Convert Windows-style  X:\... to /mnt/x/...
-        if len(path) >= 3 and path[1] == ":" and path[2] in ("\\", "/"):
-            drive = path[0].lower()
-            return "/mnt/" + drive + "/" + path[3:].replace("\\", "/")
-    return path
-
+from paths import RC_AGENT_ROOT, RC_AGENT_PROJECTS, project_dir, normalize_path
 
 # =============================================================================
 # Configuration (from .env with defaults)
 # =============================================================================
 
-PRODET_ROOT = _normalize_path(os.environ.get(
+PRODET_ROOT = normalize_path(os.environ.get(
     "PRODET_ROOT",
     r"C:\Users\jgomez\Dropbox\ProDes-Core",
 ))
-PRODET_PROJECTS = _normalize_path(os.environ.get(
+PRODET_PROJECTS = normalize_path(os.environ.get(
     "PRODET_PROJECTS",
-    r"C:\Users\jgomez\Dropbox\prodet_locales",
+    RC_AGENT_PROJECTS,
 ))
 PRODET_CONDA_ENV = os.environ.get("PRODET_CONDA_ENV", "ProDet-py39")
 
-RC_AGENT_ROOT = os.path.dirname(os.path.abspath(__file__))
-RC_AGENT_DATA = os.path.join(RC_AGENT_ROOT, "data")
+# ProDet output filenames by element type (key char from tipo[0])
+PRODET_OUTPUT_FILENAMES = {
+    "vigas": "Cantidades_Refuerzo_V.xlsx",
+    "nervios": "Cantidades_Refuerzo_N.xlsx",
+    "columnas": "Cantidades_Refuerzo_C.xlsx",
+}
 
-# ProDet output filename produced by core/main.py for vigas
-PRODET_OUTPUT_FILENAME = "Cantidades_Refuerzo_V.xlsx"
+# Fallback patterns: try both upper and lowercase first letter
+def _find_prodet_output(project_path: str, element_type: str) -> Optional[str]:
+    """Find the ProDet output xlsx for a given element type, case-insensitive."""
+    primary = PRODET_OUTPUT_FILENAMES.get(element_type)
+    if primary:
+        path = os.path.join(project_path, primary)
+        if os.path.isfile(path):
+            return path
+    # Try opposite case
+    letter = element_type[0]
+    for case in (letter.upper(), letter.lower()):
+        candidate = os.path.join(project_path, f"Cantidades_Refuerzo_{case}.xlsx")
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 # Expected JSON artifacts from the rebar pipeline
 PIPELINE_ARTIFACTS = [
@@ -114,13 +117,17 @@ def list_projects() -> Dict[str, Any]:
                 continue
 
             has_prodes = os.path.isfile(os.path.join(project_path, "project.prodes"))
-            has_output = os.path.isfile(os.path.join(project_path, PRODET_OUTPUT_FILENAME))
+            existing_outputs = [
+                fname for fname in PRODET_OUTPUT_FILENAMES.values()
+                if os.path.isfile(os.path.join(project_path, fname))
+            ]
 
             projects.append({
                 "name": entry,
                 "path": project_path,
                 "has_prodes": has_prodes,
-                "has_output": has_output,
+                "has_output": len(existing_outputs) > 0,
+                "existing_outputs": existing_outputs,
                 "ready": has_prodes,
             })
 
@@ -185,7 +192,11 @@ def inspect_project(project_name: str) -> Dict[str, Any]:
                     output_files[fname] = file_info(fpath)
 
         has_prodes = input_files["project.prodes"].get("exists", False)
-        has_output = os.path.isfile(os.path.join(project_path, PRODET_OUTPUT_FILENAME))
+        existing_outputs = [
+            fname for fname in PRODET_OUTPUT_FILENAMES.values()
+            if os.path.isfile(os.path.join(project_path, fname))
+        ]
+        has_output = len(existing_outputs) > 0
 
         # Read config summary if available
         config_summary = None
@@ -218,53 +229,33 @@ def inspect_project(project_name: str) -> Dict[str, Any]:
         return {"error": str(e)}
 
 
-@tool
-def run_prodet(
-    project_name: str,
-    element_type: str = "vigas",
-    timeout_seconds: int = 900,
+VALID_ELEMENT_TYPES = ("vigas", "nervios", "columnas")
+
+
+
+# How often (seconds) to check for the output xlsx while ProDet runs
+_POLL_INTERVAL = 2.0
+
+
+def _run_prodet_single(
+    project_path: str,
+    element_type: str,
+    timeout_seconds: int,
 ) -> Dict[str, Any]:
-    """
-    Run ProDet (ProDes-Core) for a given project.
+    """Run ProDet for a single element type. Internal helper.
 
-    Invokes `python core/main.py "<project_path>/" <element_type>` from the
-    PRODET_ROOT directory. Captures stdout/stderr and checks for the expected
-    output file (Cantidades_Refuerzo_V.xlsx).
-
-    ProDet runs can take several minutes for large projects. The default
-    timeout is 900 seconds (15 minutes). Even if the process times out,
-    the tool checks whether the output file was produced successfully.
-
-    Args:
-        project_name: Name of the project folder inside PRODET_PROJECTS.
-        element_type: Element type to process (default: "vigas").
-                      Options: vigas, columnas, muros, losas.
-        timeout_seconds: Maximum time to wait for ProDet to finish (default: 900).
-
-    Returns:
-        Dictionary with success flag, stdout, stderr, output file path,
-        and elapsed time.
+    Launches ProDet as a background process and polls for the output xlsx.
+    As soon as a fresh output file is detected the process is terminated
+    so we don't wait for drawings/PDFs that aren't needed.
     """
     cmd = []
     try:
-        project_path = os.path.join(PRODET_PROJECTS, project_name)
-        if not os.path.isdir(project_path):
-            return {"error": f"Project folder not found: {project_path}"}
-
-        if not os.path.isfile(os.path.join(project_path, "project.prodes")):
-            return {"error": f"No project.prodes found in {project_path}. Project not ready."}
-
-        if not os.path.isdir(PRODET_ROOT):
-            return {"error": f"ProDet root not found: {PRODET_ROOT}"}
-
         main_script = os.path.join(PRODET_ROOT, "core", "main.py")
         if not os.path.isfile(main_script):
             return {"error": f"ProDet main.py not found: {main_script}"}
 
-        # ProDet expects a trailing slash on the project path
         project_arg = project_path.rstrip("/\\") + os.sep
 
-        # Use conda run to invoke ProDet in its own environment
         cmd = [
             "conda", "run", "-n", PRODET_CONDA_ENV,
             "python", "core/main.py", project_arg, element_type,
@@ -272,47 +263,99 @@ def run_prodet(
         logger.info(f"Running ProDet: {' '.join(cmd)} (cwd={PRODET_ROOT})")
 
         # Record mtime of any existing output so we can detect fresh writes
-        output_path = os.path.join(project_path, PRODET_OUTPUT_FILENAME)
-        old_mtime = os.path.getmtime(output_path) if os.path.isfile(output_path) else None
+        existing_output = _find_prodet_output(project_path, element_type)
+        old_mtime = os.path.getmtime(existing_output) if existing_output else None
 
         start_time = datetime.now()
         timed_out = False
+        early_exit = False
+        return_code = None
+
+        proc = subprocess.Popen(
+            cmd,
+            cwd=PRODET_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
         try:
-            result = subprocess.run(
-                cmd,
-                cwd=PRODET_ROOT,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-            )
-            return_code = result.returncode
-            stdout = result.stdout
-            stderr = result.stderr
-        except subprocess.TimeoutExpired as te:
-            timed_out = True
-            return_code = None
-            stdout = te.stdout or ""
-            stderr = te.stderr or ""
-            if isinstance(stdout, bytes):
-                stdout = stdout.decode("utf-8", errors="replace")
-            if isinstance(stderr, bytes):
-                stderr = stderr.decode("utf-8", errors="replace")
+            # Poll until the output file appears or we time out
+            while True:
+                elapsed = (datetime.now() - start_time).total_seconds()
+
+                # Check if process finished on its own
+                ret = proc.poll()
+                if ret is not None:
+                    return_code = ret
+                    break
+
+                # Check if a fresh output file has appeared
+                output_path = _find_prodet_output(project_path, element_type)
+                if output_path is not None:
+                    new_mtime = os.path.getmtime(output_path)
+                    if (old_mtime is None) or (new_mtime > old_mtime):
+                        # Excel is ready — kill the process, we're done
+                        early_exit = True
+                        logger.info(
+                            f"Output file detected after {elapsed:.1f}s, "
+                            f"terminating ProDet process."
+                        )
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                            proc.wait(timeout=5)
+                        break
+
+                # Check timeout
+                if elapsed >= timeout_seconds:
+                    timed_out = True
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=5)
+                    break
+
+                time.sleep(_POLL_INTERVAL)
+
+        except Exception:
+            # Ensure cleanup on unexpected errors
+            proc.kill()
+            proc.wait()
+            raise
 
         elapsed = (datetime.now() - start_time).total_seconds()
 
-        # Check if output file exists and is freshly written
-        has_output = os.path.isfile(output_path)
+        # Collect whatever stdout/stderr was produced
+        stdout = ""
+        stderr = ""
+        try:
+            out, err = proc.communicate(timeout=5)
+            stdout = out or ""
+            stderr = err or ""
+        except Exception:
+            pass
+
+        # Final check for output file
+        output_path = _find_prodet_output(project_path, element_type)
+        has_output = output_path is not None
         output_is_fresh = False
         if has_output:
             new_mtime = os.path.getmtime(output_path)
             output_is_fresh = (old_mtime is None) or (new_mtime > old_mtime)
 
-        success = has_output and output_is_fresh and (return_code == 0 or timed_out)
+        success = has_output and output_is_fresh
 
         resp = {
+            "element_type": element_type,
             "success": success,
             "return_code": return_code,
             "timed_out": timed_out,
+            "early_exit": early_exit,
             "stdout": stdout[-2000:] if len(stdout) > 2000 else stdout,
             "stderr": stderr[-2000:] if len(stderr) > 2000 else stderr,
             "output_file": output_path if has_output else None,
@@ -322,7 +365,12 @@ def run_prodet(
             "command": " ".join(cmd),
         }
 
-        if timed_out and success:
+        if early_exit:
+            resp["note"] = (
+                f"Output xlsx detected after {elapsed:.1f}s — ProDet process "
+                f"was terminated early (no need to wait for drawings/PDFs)."
+            )
+        elif timed_out and success:
             resp["note"] = (
                 f"Process exceeded {timeout_seconds}s timeout but the output "
                 f"file was produced successfully."
@@ -341,36 +389,115 @@ def run_prodet(
 
 
 @tool
+def run_prodet(
+    project_name: str,
+    element_type: str = "vigas",
+    timeout_seconds: int = 900,
+) -> Dict[str, Any]:
+    """
+    Run ProDet (ProDes-Core) for a given project.
+
+    Invokes `python core/main.py "<project_path>/" <element_type>` from the
+    PRODET_ROOT directory using the ProDet conda environment.
+
+    Each element type produces its own Excel output:
+      - vigas   -> Cantidades_Refuerzo_V.xlsx
+      - nervios -> Cantidades_Refuerzo_N.xlsx
+      - columnas -> Cantidades_Refuerzo_C.xlsx
+
+    ProDet runs can take several minutes for large projects. The default
+    timeout is 900 seconds (15 minutes). Even if the process times out,
+    the tool checks whether the output file was produced successfully.
+
+    Note: Output types (drawings/PDFs vs Excel-only) are controlled by the
+    gen_informe flag inside the project's project.config file, not by this tool.
+
+    Args:
+        project_name: Name of the project folder inside PRODET_PROJECTS.
+        element_type: Element type to process. Options:
+                      "vigas" (beams, default), "nervios" (joists),
+                      "columnas" (columns), or "ambos" (runs vigas then nervios).
+        timeout_seconds: Maximum time per run (default: 900). For "ambos",
+                         this timeout applies to each run independently.
+
+    Returns:
+        Dictionary with success flag, stdout, stderr, output file path,
+        and elapsed time. For "ambos", returns results for each run.
+    """
+    try:
+        project_path = os.path.join(PRODET_PROJECTS, project_name)
+        if not os.path.isdir(project_path):
+            return {"error": f"Project folder not found: {project_path}"}
+
+        if not os.path.isfile(os.path.join(project_path, "project.prodes")):
+            return {"error": f"No project.prodes found in {project_path}. Project not ready."}
+
+        if not os.path.isdir(PRODET_ROOT):
+            return {"error": f"ProDet root not found: {PRODET_ROOT}"}
+
+        # Handle "ambos" — run vigas then nervios sequentially
+        if element_type == "ambos":
+            results = {}
+            all_success = True
+            for etype in ("vigas", "nervios"):
+                res = _run_prodet_single(project_path, etype, timeout_seconds)
+                results[etype] = res
+                if not res.get("success"):
+                    all_success = False
+            return {
+                "element_type": "ambos",
+                "all_success": all_success,
+                "runs": results,
+            }
+
+        if element_type not in VALID_ELEMENT_TYPES:
+            return {
+                "error": f"Invalid element_type '{element_type}'. "
+                         f"Valid options: {', '.join(VALID_ELEMENT_TYPES)}, ambos."
+            }
+
+        return _run_prodet_single(project_path, element_type, timeout_seconds)
+
+    except Exception as e:
+        logger.error(f"Error running ProDet: {e}")
+        return {"error": str(e)}
+
+
+@tool
 def copy_output_to_rc_agent(
     project_name: str,
+    element_type: str = "vigas",
     output_filename: str = "reinforcement_solution.xlsx",
 ) -> Dict[str, Any]:
     """
-    Copy ProDet output file to rc_agent's data directory.
+    Copy ProDet output file to rc_agent's projects directory.
 
-    Copies Cantidades_Refuerzo_V.xlsx from the project folder to
-    data/<output_filename>. If a file already exists at the destination,
+    Finds the output xlsx for the given element type and copies it to
+    projects/<project_name>/<output_filename>. If a file already exists at the destination,
     it is backed up with a timestamp suffix before overwriting.
 
     Args:
         project_name: Name of the project folder inside PRODET_PROJECTS.
-        output_filename: Target filename in data/ (default: "reinforcement_solution.xlsx").
+        element_type: Which element type output to copy (default: "vigas").
+                      Options: vigas, nervios, columnas.
+        output_filename: Target filename in projects/<project_name>/ (default: "reinforcement_solution.xlsx").
 
     Returns:
         Dictionary with source, destination, backup path (if any), and success flag.
     """
     try:
         project_path = os.path.join(PRODET_PROJECTS, project_name)
-        source = os.path.join(project_path, PRODET_OUTPUT_FILENAME)
+        source = _find_prodet_output(project_path, element_type)
 
-        if not os.path.isfile(source):
+        if source is None:
+            expected = PRODET_OUTPUT_FILENAMES.get(element_type, f"Cantidades_Refuerzo_?.xlsx")
             return {
-                "error": f"Output file not found: {source}. Run ProDet first.",
-                "expected_file": source,
+                "error": f"Output file not found for element_type='{element_type}' "
+                         f"in {project_path}. Expected: {expected}. Run ProDet first.",
             }
 
-        os.makedirs(RC_AGENT_DATA, exist_ok=True)
-        destination = os.path.join(RC_AGENT_DATA, output_filename)
+        data_dir = project_dir(project_name)
+        destination = os.path.join(data_dir, output_filename)
 
         # Back up existing file
         backup_path = None
@@ -378,7 +505,7 @@ def copy_output_to_rc_agent(
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             name, ext = os.path.splitext(output_filename)
             backup_name = f"{name}_{timestamp}{ext}"
-            backup_path = os.path.join(RC_AGENT_DATA, backup_name)
+            backup_path = os.path.join(data_dir, backup_name)
             shutil.copy2(destination, backup_path)
             logger.info(f"Backed up existing file to: {backup_path}")
 
@@ -404,6 +531,7 @@ def copy_output_to_rc_agent(
 @tool
 def run_data_pipeline(
     xlsx_path: str = None,
+    project_name: str = None,
     timeout_seconds: int = 120,
 ) -> Dict[str, Any]:
     """
@@ -413,17 +541,25 @@ def run_data_pipeline(
     elements.json, elements_with_ci.json, elements_with_prod.json,
     work_packages.json, floor_schedule.json.
 
+    When project_name is given, artifacts are written to projects/<project_name>/
+    instead of the default projects/ directory.
+
     Args:
         xlsx_path: Path to the input .xlsx file. Defaults to
-                   data/reinforcement_solution.xlsx.
+                   projects/<project_name>/reinforcement_solution.xlsx (or
+                   projects/reinforcement_solution.xlsx if no project).
+        project_name: Optional project name. When set, the pipeline outputs
+                      go to projects/<project_name>/.
         timeout_seconds: Maximum time to wait for the pipeline (default: 120).
 
     Returns:
         Dictionary with success flag, stdout/stderr, and list of generated artifacts.
     """
     try:
+        data_dir = project_dir(project_name)
+
         if xlsx_path is None:
-            xlsx_path = os.path.join(RC_AGENT_DATA, "reinforcement_solution.xlsx")
+            xlsx_path = os.path.join(data_dir, "reinforcement_solution.xlsx")
 
         if not os.path.isfile(xlsx_path):
             return {"error": f"Input xlsx not found: {xlsx_path}"}
@@ -432,7 +568,7 @@ def run_data_pipeline(
         if not os.path.isfile(pipeline_script):
             return {"error": f"Pipeline script not found: {pipeline_script}"}
 
-        cmd = [sys.executable, pipeline_script, "-x", xlsx_path]
+        cmd = [sys.executable, pipeline_script, "-x", xlsx_path, "-d", data_dir]
         logger.info(f"Running pipeline: {' '.join(cmd)}")
 
         start_time = datetime.now()
@@ -448,7 +584,7 @@ def run_data_pipeline(
         # Check which artifacts were generated
         artifacts = {}
         for artifact_name in PIPELINE_ARTIFACTS:
-            artifact_path = os.path.join(RC_AGENT_DATA, artifact_name)
+            artifact_path = os.path.join(data_dir, artifact_name)
             if os.path.isfile(artifact_path):
                 stat = os.stat(artifact_path)
                 artifacts[artifact_name] = {
@@ -470,6 +606,7 @@ def run_data_pipeline(
             "artifacts": artifacts,
             "all_artifacts_generated": all_generated,
             "xlsx_path": xlsx_path,
+            "data_dir": data_dir,
         }
 
     except subprocess.TimeoutExpired:
@@ -509,25 +646,51 @@ You help users run ProDet (a reinforced concrete design tool) on project files a
    Shows which projects have a project.prodes file and are ready to run.
 
 2. **inspect_project** — Get detailed info about a specific project:
-   input files, existing outputs, config summary, readiness status.
+   input files (project.prodes, project.geom, project.cargas, project.config),
+   existing outputs, config summary, readiness status.
 
-3. **run_prodet** — Execute ProDet for a project. Runs core/main.py with the
-   specified element type (default: vigas). Captures output and checks for
-   the expected Cantidades_Refuerzo_V.xlsx file.
+3. **run_prodet** — Execute ProDet for a project. Supports element types:
+   - "vigas" (beams) — produces Cantidades_Refuerzo_V.xlsx
+   - "nervios" (joists) — produces Cantidades_Refuerzo_N.xlsx
+   - "columnas" (columns) — produces Cantidades_Refuerzo_C.xlsx
+   - "ambos" — runs vigas then nervios sequentially
+   Runs can take several minutes. If the process times out but the output
+   file was produced, it still counts as success.
 
 4. **copy_output_to_rc_agent** — Copy the ProDet output xlsx into rc_agent's
-   data/ folder. Automatically backs up any existing file before overwriting.
+   projects/ folder. Specify element_type to pick the right file.
+   Automatically backs up any existing file before overwriting.
 
 5. **run_data_pipeline** — Run the full rebar pipeline (reinforcement_parser ->
    complexity_index -> productivity -> work_packages -> floor_schedule) to
    generate the 5 JSON artifacts used by the other agents.
 
+== ELEMENT TYPES ==
+
+Always ask the user what they want to solve if not specified:
+- **vigas** (beams): Most common, default choice
+- **nervios** (joists/ribs): For ribbed slabs
+- **columnas** (columns): Column design
+- **ambos** (both): Runs vigas + nervios sequentially
+
+== OUTPUT TYPES ==
+
+ProDet can generate different outputs (drawings, PDFs, Excel) depending on
+the gen_informe setting in the project's project.config file. This agent
+does not modify that setting — it runs ProDet with whatever config the
+project already has. If the user wants to change output types, they should
+edit project.config directly.
+
 == USAGE GUIDELINES ==
 
-- When a user asks to "run ProDet" or "process a project", follow the full workflow:
+- When a user asks to "run ProDet" or "process a project", ASK which
+  element type they want (vigas, nervios, columnas, or ambos) unless
+  they already specified.
+
+- Follow the full workflow:
   1. First inspect the project to verify readiness
-  2. Run ProDet
-  3. If successful, copy the output
+  2. Run ProDet with the requested element type
+  3. If successful, copy the output (specify element_type)
   4. Then run the data pipeline
   5. Report the results of each step
 
@@ -549,6 +712,7 @@ PROJECT STATUS
 - Input files: [list with status]
 
 PRODET RUN
+- Element type: [vigas/nervios/columnas/ambos]
 - Status: Success/Failed
 - Output: [filename, size]
 - Time: [elapsed seconds]
@@ -561,13 +725,30 @@ PIPELINE
 NEXT STEPS
 - What the user can do next (e.g., "Use the Procurement Agent to review the data")
 
+== PROJECT-SPECIFIC DATA ==
+
+All project outputs are stored in **projects/<project_name>/** subfolders.
+For example, running ProDet for project "mokara" stores files in projects/mokara/.
+
+- Always pass **project_name** to `copy_output_to_rc_agent` (this routes the
+  xlsx to the right subfolder automatically).
+- Always pass **project_name** to `run_data_pipeline` so JSON artifacts land
+  in the same subfolder.
+- After a successful run, remind the user that other agents (Procurement,
+  Scheduling) should use project-specific paths, e.g.:
+  - `projects/mokara/reinforcement_solution.xlsx`
+  - `projects/mokara/work_packages.json`
+  - `projects/mokara/floor_schedule.json`
+- If the user sets an active project with `/project <name>` in the CLI, those
+  paths are injected automatically.
+
 == IMPORTANT ==
 
 - Use tools for all operations — don't try to run commands manually
 - Report errors clearly with actionable suggestions
-- The default element_type is "vigas" (beams) — mention this to the user
 - After a successful full run, remind the user they can now use the other agents
-  (Procurement, Scheduling, Grouping) to analyze the processed data
+  (Procurement, Scheduling, Grouping) to analyze the processed data, pointing
+  them to the project subfolder path (e.g. projects/mokara/)
 """
 
     def __init__(self, model_name: str = "claude-sonnet-4-6", temperature: float = 0.0):

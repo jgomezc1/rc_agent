@@ -10,8 +10,8 @@ Usage:
     python work_packages.py [-i INPUT] [-o OUTPUT]
 
     Defaults:
-        INPUT:  data/elements_with_prod.json
-        OUTPUT: data/work_packages.json
+        INPUT:  projects/elements_with_prod.json
+        OUTPUT: projects/work_packages.json
 """
 
 import sys
@@ -174,13 +174,13 @@ def main():
     )
     parser.add_argument(
         "-i", "--input",
-        default="data/elements_with_prod.json",
-        help="Path to input JSON file (default: data/elements_with_prod.json)"
+        default="projects/elements_with_prod.json",
+        help="Path to input JSON file (default: projects/elements_with_prod.json)"
     )
     parser.add_argument(
         "-o", "--output",
-        default="data/work_packages.json",
-        help="Path to output JSON file (default: data/work_packages.json)"
+        default="projects/work_packages.json",
+        help="Path to output JSON file (default: projects/work_packages.json)"
     )
 
     args = parser.parse_args()

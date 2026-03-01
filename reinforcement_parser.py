@@ -10,8 +10,8 @@ Usage:
     python reinforcement_parser.py [input_file] [output_file]
 
     Defaults:
-        input_file:  data/reinforcement_solution.xlsx
-        output_file: data/elements.json
+        input_file:  projects/reinforcement_solution.xlsx
+        output_file: projects/elements.json
 """
 
 import sys
@@ -394,13 +394,13 @@ def main():
     )
     parser.add_argument(
         "-i", "--input",
-        default="data/reinforcement_solution.xlsx",
-        help="Path to input Excel file (default: data/reinforcement_solution.xlsx)"
+        default="projects/reinforcement_solution.xlsx",
+        help="Path to input Excel file (default: projects/reinforcement_solution.xlsx)"
     )
     parser.add_argument(
         "-o", "--output",
-        default="data/elements.json",
-        help="Path to output JSON file (default: data/elements.json)"
+        default="projects/elements.json",
+        help="Path to output JSON file (default: projects/elements.json)"
     )
 
     args = parser.parse_args()

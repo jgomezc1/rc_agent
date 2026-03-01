@@ -8,8 +8,10 @@ Usage:
     python cli.py --procurement "query"     # Procurement agent single query
     python cli.py --scheduling "query"      # Scheduling agent single query
     python cli.py --prodet "query"          # ProDet runner single query
+    python cli.py --config "query"          # Config agent single query
 """
 
+import argparse
 import sys
 import threading
 import time
@@ -81,8 +83,8 @@ AGENTS = {
         'module': 'grouping_optimizer',
         'class': 'GroupingOptimizerAgent',
         'examples': [
-            'Optimize data/summary.xlsx from PISO 5 to PISO 15 with k=2,3,4',
-            'What levels are available in data/summary.xlsx?'
+            'Optimize projects/summary.xlsx from PISO 5 to PISO 15 with k=2,3,4',
+            'What levels are available in projects/summary.xlsx?'
         ]
     },
     '2': {
@@ -120,6 +122,18 @@ AGENTS = {
             'Run ProDet for mokara and process the output',
             'Run the data pipeline on the current xlsx'
         ]
+    },
+    '5': {
+        'name': 'Config Agent',
+        'description': 'Describe and create ProDet project.config files using natural language',
+        'module': 'config_agent',
+        'class': 'ConfigAgent',
+        'examples': [
+            'Describe the configuration for the mokara project',
+            'Create a new config with DES demand and 280 kg/cm2 concrete for beams',
+            'Change the max rebar size to 1" for vigas',
+            'What are the current detailing parameters for nervios?'
+        ]
     }
 }
 
@@ -141,10 +155,23 @@ def load_agent(agent_key: str):
     return agent_class(), agent_info
 
 
-def run_interactive(agent, agent_info):
-    """Run interactive chat session with an agent."""
+def _build_message(user_input: str, active_project: str = None) -> str:
+    """Prepend project context prefix to user message if a project is active."""
+    if active_project:
+        return f"[Active project: {active_project} — use projects/{active_project}/ for all file paths]\n{user_input}"
+    return user_input
+
+
+def run_interactive(agent, agent_info, active_project: str = None):
+    """Run interactive chat session with an agent.
+
+    Returns a tuple (action, active_project) where action is 'menu' or 'exit'.
+    """
     print(f"\n{GREEN}━━━ {agent_info['name']} ━━━{RESET}")
-    print(f"\nType 'back' to return to agent selection, 'exit' to quit.\n")
+    if active_project:
+        print(f"  Active project: {YELLOW}{active_project}{RESET}")
+    print(f"\nType 'back' to return to agent selection, 'exit' to quit.")
+    print(f"Use '/project <name>' to set active project, '/project' to show current.\n")
     print("Example queries:")
     for example in agent_info['examples']:
         print(f"  - {example}")
@@ -154,116 +181,118 @@ def run_interactive(agent, agent_info):
 
     while True:
         try:
-            user_input = input(f"{CYAN}You:{RESET} ").strip()
+            if active_project:
+                prompt_label = f"{CYAN}You [{active_project}]:{RESET} "
+            else:
+                prompt_label = f"{CYAN}You:{RESET} "
+            user_input = input(prompt_label).strip()
         except (KeyboardInterrupt, EOFError):
             print("\nReturning to menu...")
-            return 'menu'
+            return 'menu', active_project
 
         if not user_input:
             continue
 
         if user_input.lower() == 'back':
-            return 'menu'
+            return 'menu', active_project
 
         if user_input.lower() in ['exit', 'quit', 'q']:
-            return 'exit'
+            return 'exit', active_project
+
+        # Handle /project command
+        if user_input.startswith('/project'):
+            parts = user_input.split(None, 1)
+            if len(parts) > 1:
+                active_project = parts[1].strip()
+                print(f"{GREEN}Active project set to: {active_project}{RESET}")
+                print(f"  Data path: projects/{active_project}/\n")
+            else:
+                if active_project:
+                    print(f"Active project: {YELLOW}{active_project}{RESET} (projects/{active_project}/)\n")
+                else:
+                    print(f"No active project. Use '/project <name>' to set one.\n")
+            continue
 
         print()
         try:
+            message = _build_message(user_input, active_project)
             with Spinner("Thinking"):
-                response = agent.run(user_input, chat_history=chat_history)
+                response = agent.run(message, chat_history=chat_history)
             print(f"{GREEN}Agent:{RESET} {response}")
             print()
 
-            chat_history.append(HumanMessage(content=user_input))
+            chat_history.append(HumanMessage(content=message))
             chat_history.append(AIMessage(content=response))
 
         except Exception as e:
             print(f"{YELLOW}Error:{RESET} {e}\n")
 
-    return 'menu'
+    return 'menu', active_project
+
+
+def _parse_args():
+    """Parse CLI arguments. Returns (agent_flag, query, project) or None for interactive."""
+    parser = argparse.ArgumentParser(
+        description="ProDet Agent CLI — Construction Intelligence Platform",
+        add_help=True,
+    )
+    parser.add_argument("--grouping", nargs=argparse.REMAINDER, help="Grouping optimizer query")
+    parser.add_argument("--procurement", nargs=argparse.REMAINDER, help="Procurement agent query")
+    parser.add_argument("--scheduling", nargs=argparse.REMAINDER, help="Scheduling agent query")
+    parser.add_argument("--prodet", nargs=argparse.REMAINDER, help="ProDet runner query")
+    parser.add_argument("--config", nargs=argparse.REMAINDER, help="Config agent query")
+    parser.add_argument("-p", "--project", type=str, default=None,
+                        help="Set active project (data stored in projects/<project>/)")
+    return parser
 
 
 def main():
     print(MAIN_BANNER)
 
-    # Handle command-line arguments for single query mode
-    if len(sys.argv) > 1:
-        arg = sys.argv[1]
+    parser = _parse_args()
+    args = parser.parse_args()
 
-        if arg == '--grouping' and len(sys.argv) > 2:
-            from grouping_optimizer import GroupingOptimizerAgent
-            query = " ".join(sys.argv[2:])
-            print("Initializing Grouping Optimizer...")
-            agent = GroupingOptimizerAgent()
-            print(f"\nQuery: {query}\n")
+    active_project = args.project
+
+    # Single-query mode: detect which agent flag was used
+    agent_modes = [
+        ("grouping", args.grouping, "Grouping Optimizer", "Analyzing floor groupings",
+         lambda: __import__("grouping_optimizer").GroupingOptimizerAgent()),
+        ("procurement", args.procurement, "Procurement Agent", "Reviewing reinforcement data",
+         lambda: __import__("procurement_agent").ProcurementAgent()),
+        ("scheduling", args.scheduling, "Scheduling Agent", "Computing schedule",
+         lambda: __import__("scheduling_agent").SchedulingAgent()),
+        ("prodet", args.prodet, "ProDet Runner", "Running ProDet workflow",
+         lambda: __import__("prodet_agent").ProDetAgent()),
+        ("config", args.config, "Config Agent", "Analyzing configuration",
+         lambda: __import__("config_agent").ConfigAgent()),
+    ]
+
+    for flag_name, flag_value, label, spinner_msg, factory in agent_modes:
+        if flag_value is not None:
+            query = " ".join(flag_value)
+            if not query.strip():
+                print(f"Error: --{flag_name} requires a query string.")
+                return 1
+            print(f"Initializing {label}...")
+            agent = factory()
+            message = _build_message(query, active_project)
+            print(f"\nQuery: {query}")
+            if active_project:
+                print(f"Project: {active_project}")
+            print()
             print("-" * 60)
-            with Spinner("Analyzing floor groupings"):
-                result = agent.run(query)
-            print(result)
-            return 0
-
-        elif arg == '--procurement' and len(sys.argv) > 2:
-            from procurement_agent import ProcurementAgent
-            query = " ".join(sys.argv[2:])
-            print("Initializing Procurement Agent...")
-            agent = ProcurementAgent()
-            print(f"\nQuery: {query}\n")
-            print("-" * 60)
-            with Spinner("Reviewing reinforcement data"):
-                result = agent.run(query)
-            print(result)
-            return 0
-
-        elif arg == '--scheduling' and len(sys.argv) > 2:
-            from scheduling_agent import SchedulingAgent
-            query = " ".join(sys.argv[2:])
-            print("Initializing Scheduling Agent...")
-            agent = SchedulingAgent()
-            print(f"\nQuery: {query}\n")
-            print("-" * 60)
-            with Spinner("Computing schedule"):
-                result = agent.run(query)
-            print(result)
-            return 0
-
-        elif arg == '--prodet' and len(sys.argv) > 2:
-            from prodet_agent import ProDetAgent
-            query = " ".join(sys.argv[2:])
-            print("Initializing ProDet Runner...")
-            agent = ProDetAgent()
-            print(f"\nQuery: {query}\n")
-            print("-" * 60)
-            with Spinner("Running ProDet workflow"):
-                result = agent.run(query)
-            print(result)
-            return 0
-
-        elif arg in ['--help', '-h']:
-            print("Usage:")
-            print("  python cli.py                           # Interactive mode")
-            print("  python cli.py --grouping \"query\"        # Grouping optimizer")
-            print("  python cli.py --procurement \"query\"     # Procurement agent")
-            print("  python cli.py --scheduling \"query\"      # Scheduling agent")
-            print("  python cli.py --prodet \"query\"          # ProDet runner")
-            return 0
-
-        else:
-            # Backwards compatibility: treat as grouping optimizer query
-            from grouping_optimizer import GroupingOptimizerAgent
-            query = " ".join(sys.argv[1:])
-            print("Initializing Grouping Optimizer...")
-            agent = GroupingOptimizerAgent()
-            print(f"\nQuery: {query}\n")
-            print("-" * 60)
-            with Spinner("Analyzing floor groupings"):
-                result = agent.run(query)
+            with Spinner(spinner_msg):
+                result = agent.run(message)
             print(result)
             return 0
 
     # Interactive mode with agent selection
     while True:
         print_agent_menu()
+        if active_project:
+            print(f"  Active project: {YELLOW}{active_project}{RESET}")
+            print(f"  Use '/project <name>' to change, '/project' to show current.\n")
 
         try:
             choice = input(f"{CYAN}Select agent [1-{len(AGENTS)}]:{RESET} ").strip()
@@ -290,9 +319,9 @@ def main():
             continue
 
         # Run interactive session
-        result = run_interactive(agent, agent_info)
+        action, active_project = run_interactive(agent, agent_info, active_project)
 
-        if result == 'exit':
+        if action == 'exit':
             print("Goodbye!")
             return 0
         # If 'menu', loop continues to show menu again

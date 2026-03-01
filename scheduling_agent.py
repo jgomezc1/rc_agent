@@ -51,8 +51,8 @@ except ImportError:
 # Defaults
 # =============================================================================
 
-DEFAULT_WORK_PACKAGES_PATH = "data/work_packages.json"
-DEFAULT_FLOOR_SCHEDULE_PATH = "data/floor_schedule.json"
+DEFAULT_WORK_PACKAGES_PATH = "projects/work_packages.json"
+DEFAULT_FLOOR_SCHEDULE_PATH = "projects/floor_schedule.json"
 
 
 # =============================================================================
@@ -265,7 +265,7 @@ def compute_floor_schedule_tool(
 
     Args:
         work_packages_path: Path to work_packages.json file.
-                           Default: "data/work_packages.json"
+                           Default: "projects/work_packages.json"
         hours_per_day: Working hours per day. Default: 8.0
         rebar_beams_crews: Number of crews for beam rebar work. Default: 2
         rebar_columns_crews: Number of crews for column rebar work. Default: 1
@@ -320,7 +320,7 @@ def load_floor_schedule_tool(
 
     Args:
         floor_schedule_path: Path to floor_schedule.json file.
-                            Default: "data/floor_schedule.json"
+                            Default: "projects/floor_schedule.json"
 
     Returns:
         Dictionary containing the schedule data plus a summary with:
@@ -393,9 +393,9 @@ def generate_gantt_chart(
 
     Args:
         work_packages_path: Path to work_packages.json (used if computing fresh schedule).
-                           Default: "data/work_packages.json"
+                           Default: "projects/work_packages.json"
         floor_schedule_path: Path to floor_schedule.json (used if use_existing_schedule=True).
-                            Default: "data/floor_schedule.json"
+                            Default: "projects/floor_schedule.json"
         hours_per_day: Working hours per day. Default: 8.0
         rebar_beams_crews: Number of crews for beam rebar work. Default: 2
         rebar_columns_crews: Number of crews for column rebar work. Default: 1
@@ -580,6 +580,14 @@ Present results in clear, structured format:
 - "Compare current schedule with double the beam crews"
 - "Generate a Gantt chart for the current schedule"
 - "Create a Gantt chart with 3 beam crews and 10-hour days"
+
+== PROJECT-SPECIFIC DATA ==
+
+If the user mentions a project name or the message contains [Active project: X],
+use project-specific paths:
+  - work_packages_path: "projects/<project_name>/work_packages.json"
+  - floor_schedule_path: "projects/<project_name>/floor_schedule.json"
+If no project is specified, use the defaults.
 """
 
     def __init__(self, model_name: str = "claude-sonnet-4-6", temperature: float = 0.0):
