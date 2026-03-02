@@ -1614,6 +1614,353 @@ def generate_procurement_report(
         return {"error": str(e)}
 
 
+# =============================================================================
+# Reinforcement Comparison Tool
+# =============================================================================
+
+def _resolve_reinforcement_file(project_name: str, element_type: str) -> Optional[str]:
+    """Find the reinforcement Excel file for a project + element type.
+
+    Search order:
+      1. Cantidades_Refuerzo_V.xlsx (ProDet native) for vigas, _N for nervios
+      2. reinforcement_solution_V.xlsx (copy_output naming)
+      3. reinforcement_solution.xlsx (legacy fallback)
+    """
+    from paths import RC_AGENT_PROJECTS
+    proj_dir = os.path.join(RC_AGENT_PROJECTS, project_name)
+    if not os.path.isdir(proj_dir):
+        return None
+
+    suffix_map = {"vigas": "V", "nervios": "N", "columnas": "C"}
+    suffix = suffix_map.get(element_type, element_type[0].upper())
+
+    candidates = [
+        f"Cantidades_Refuerzo_{suffix}.xlsx",
+        f"reinforcement_solution_{suffix}.xlsx",
+        "reinforcement_solution.xlsx",
+    ]
+    for fname in candidates:
+        path = os.path.join(proj_dir, fname)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _load_resumen(xlsx_path: str) -> pd.DataFrame:
+    """Load Resumen_Refuerzo sheet and return clean floor-level totals."""
+    df = pd.read_excel(xlsx_path, sheet_name="Resumen_Refuerzo", header=2)
+    df.columns = [str(c).strip() for c in df.columns]
+    # Drop units row if present
+    if len(df) > 0:
+        first = df.iloc[0]
+        if all(str(v).strip().lower() in ("-", "#", "nombre", "tonf", "m", "kgf", "")
+               or pd.isna(v) for v in first.values[:min(5, len(first))]):
+            df = df.iloc[1:].reset_index(drop=True)
+    return df
+
+
+def _extract_resumen_totals(df: pd.DataFrame) -> Dict[str, Any]:
+    """Extract total weight and per-floor data from Resumen_Refuerzo."""
+    # Find columns by partial match
+    nivel_col = None
+    long_col = None
+    trans_col = None
+    total_col = None
+    for c in df.columns:
+        cl = c.lower().strip()
+        if cl in ("nivel", "piso"):
+            nivel_col = c
+        elif "longitudinal" in cl:
+            long_col = c
+        elif "transversal" in cl:
+            trans_col = c
+        elif "total" in cl and "nivel" in cl:
+            total_col = c
+
+    if nivel_col is None:
+        # Fallback: first column is level
+        nivel_col = df.columns[0]
+    if total_col is None and len(df.columns) >= 4:
+        total_col = df.columns[-1]
+
+    # Separate TOTALES row from floor rows
+    totals_mask = df[nivel_col].astype(str).str.upper().str.strip() == "TOTALES"
+    floor_df = df[~totals_mask].copy()
+    totals_row = df[totals_mask]
+
+    # Total weight
+    if not totals_row.empty and total_col:
+        total_weight = pd.to_numeric(totals_row.iloc[0][total_col], errors="coerce")
+    elif total_col:
+        total_weight = pd.to_numeric(floor_df[total_col], errors="coerce").sum()
+    else:
+        total_weight = float("nan")
+
+    long_total = float("nan")
+    trans_total = float("nan")
+    if not totals_row.empty:
+        if long_col:
+            long_total = pd.to_numeric(totals_row.iloc[0][long_col], errors="coerce")
+        if trans_col:
+            trans_total = pd.to_numeric(totals_row.iloc[0][trans_col], errors="coerce")
+    else:
+        if long_col:
+            long_total = pd.to_numeric(floor_df[long_col], errors="coerce").sum()
+        if trans_col:
+            trans_total = pd.to_numeric(floor_df[trans_col], errors="coerce").sum()
+
+    # Per-floor data
+    floors = []
+    for _, row in floor_df.iterrows():
+        floor_name = str(row[nivel_col]).strip()
+        if not floor_name or floor_name.lower() in ("nan", "-", ""):
+            continue
+        floor_total = pd.to_numeric(row.get(total_col, float("nan")), errors="coerce") if total_col else float("nan")
+        floors.append({"floor": floor_name, "total_tonf": round(float(floor_total), 4) if not pd.isna(floor_total) else 0})
+
+    return {
+        "total_weight_tonf": round(float(total_weight), 4) if not pd.isna(total_weight) else 0,
+        "longitudinal_tonf": round(float(long_total), 4) if not pd.isna(long_total) else 0,
+        "transverse_tonf": round(float(trans_total), 4) if not pd.isna(trans_total) else 0,
+        "floors": floors,
+    }
+
+
+def _count_unique_bar_types(xlsx_path: str) -> Dict[str, Any]:
+    """Count unique bar types from RefLong_Total and RefTrans_Total sheets."""
+    xlsx = pd.ExcelFile(xlsx_path)
+    long_count = 0
+    trans_count = 0
+    diameters_long = set()
+    diameters_trans = set()
+
+    if "RefLong_Total" in xlsx.sheet_names:
+        df = pd.read_excel(xlsx, sheet_name="RefLong_Total", header=1)
+        df.columns = [str(c).strip() for c in df.columns]
+        # Drop units row
+        if len(df) > 0:
+            first = df.iloc[0]
+            if all(str(v).strip().lower() in ("-", "#", "m", "kgf", "tonf", "")
+                   or pd.isna(v) for v in first.values[:min(5, len(first))]):
+                df = df.iloc[1:].reset_index(drop=True)
+        # Filter valid rows (must have a Calibre value)
+        cal_col = None
+        for c in df.columns:
+            if c.lower().strip() in ("calibre", "bar_diameter"):
+                cal_col = c
+                break
+        if cal_col:
+            valid = df[df[cal_col].notna() & (df[cal_col].astype(str).str.strip() != "") & (df[cal_col].astype(str).str.strip() != "-")]
+            long_count = len(valid)
+            diameters_long = set(valid[cal_col].astype(str).str.strip().unique())
+
+    if "RefTrans_Total" in xlsx.sheet_names:
+        df = pd.read_excel(xlsx, sheet_name="RefTrans_Total", header=1)
+        df.columns = [str(c).strip() for c in df.columns]
+        if len(df) > 0:
+            first = df.iloc[0]
+            if all(str(v).strip().lower() in ("-", "#", "m", "kgf", "tonf", "")
+                   or pd.isna(v) for v in first.values[:min(5, len(first))]):
+                df = df.iloc[1:].reset_index(drop=True)
+        cal_col = None
+        for c in df.columns:
+            if c.lower().strip() in ("calibre", "bar_diameter"):
+                cal_col = c
+                break
+        if cal_col:
+            valid = df[df[cal_col].notna() & (df[cal_col].astype(str).str.strip() != "") & (df[cal_col].astype(str).str.strip() != "-")]
+            trans_count = len(valid)
+            diameters_trans = set(valid[cal_col].astype(str).str.strip().unique())
+
+    return {
+        "unique_bar_types_long": long_count,
+        "unique_bar_types_trans": trans_count,
+        "unique_bar_types_total": long_count + trans_count,
+        "diameters_used": sorted(diameters_long | diameters_trans),
+    }
+
+
+def _extract_diameter_weights(xlsx_path: str) -> Dict[str, float]:
+    """Extract total weight per diameter from RefLong_Total + RefTrans_Total."""
+    xlsx = pd.ExcelFile(xlsx_path)
+    diameter_weights: Dict[str, float] = {}
+
+    for sheet_name in ("RefLong_Total", "RefTrans_Total"):
+        if sheet_name not in xlsx.sheet_names:
+            continue
+        df = pd.read_excel(xlsx, sheet_name=sheet_name, header=1)
+        df.columns = [str(c).strip() for c in df.columns]
+        # Drop units row
+        if len(df) > 0:
+            first = df.iloc[0]
+            if all(str(v).strip().lower() in ("-", "#", "m", "kgf", "tonf", "")
+                   or pd.isna(v) for v in first.values[:min(5, len(first))]):
+                df = df.iloc[1:].reset_index(drop=True)
+
+        cal_col = None
+        peso_col = None
+        for c in df.columns:
+            cl = c.lower().strip()
+            if cl in ("calibre", "bar_diameter"):
+                cal_col = c
+            if cl in ("peso", "weight", "kgf"):
+                peso_col = c
+        if not cal_col or not peso_col:
+            continue
+
+        for dia, grp in df.groupby(cal_col):
+            dia_str = str(dia).strip()
+            if not dia_str or dia_str in ("-", ""):
+                continue
+            weight_kgf = pd.to_numeric(grp[peso_col], errors="coerce").sum()
+            weight_tonf = weight_kgf / 1000
+            diameter_weights[dia_str] = diameter_weights.get(dia_str, 0) + weight_tonf
+
+    return diameter_weights
+
+
+def _build_project_stats(project_name: str, xlsx_path: str) -> Dict[str, Any]:
+    """Build full stats dict for one project's reinforcement file."""
+    resumen_df = _load_resumen(xlsx_path)
+    resumen = _extract_resumen_totals(resumen_df)
+    bar_types = _count_unique_bar_types(xlsx_path)
+    diameter_weights = _extract_diameter_weights(xlsx_path)
+
+    return {
+        "project": project_name,
+        "file": xlsx_path,
+        "total_weight_tonf": resumen["total_weight_tonf"],
+        "longitudinal_tonf": resumen["longitudinal_tonf"],
+        "transverse_tonf": resumen["transverse_tonf"],
+        "unique_bar_types_long": bar_types["unique_bar_types_long"],
+        "unique_bar_types_trans": bar_types["unique_bar_types_trans"],
+        "unique_bar_types_total": bar_types["unique_bar_types_total"],
+        "diameters_used": bar_types["diameters_used"],
+        "diameter_weights_tonf": {k: round(v, 4) for k, v in diameter_weights.items()},
+        "floors": resumen["floors"],
+    }
+
+
+@tool
+def compare_reinforcement(
+    baseline_project: str,
+    variant_project: str,
+    element_type: str = "vigas",
+) -> Dict[str, Any]:
+    """
+    Compare reinforcement solutions between two projects.
+
+    Loads Resumen_Refuerzo, RefLong_Total, and RefTrans_Total from both
+    projects and computes deltas for total weight, unique bar types, and
+    per-diameter breakdown. Useful for evaluating the impact of config
+    changes on steel consumption and piece complexity.
+
+    Args:
+        baseline_project: Name of the baseline project (e.g. "mokara").
+        variant_project: Name of the variant project (e.g. "mokara_speed").
+        element_type: Element type to compare (default: "vigas").
+                      Determines which Excel file to load (_V, _N, _C suffix).
+
+    Returns:
+        Dictionary with baseline stats, variant stats, deltas, diameter
+        comparison, and floor-level comparison.
+    """
+    try:
+        # Resolve files
+        base_file = _resolve_reinforcement_file(baseline_project, element_type)
+        if not base_file:
+            return {"error": f"No reinforcement file found for baseline project '{baseline_project}' (element_type={element_type})"}
+
+        var_file = _resolve_reinforcement_file(variant_project, element_type)
+        if not var_file:
+            return {"error": f"No reinforcement file found for variant project '{variant_project}' (element_type={element_type})"}
+
+        # Build stats
+        base_stats = _build_project_stats(baseline_project, base_file)
+        var_stats = _build_project_stats(variant_project, var_file)
+
+        # Compute deltas
+        delta_weight = var_stats["total_weight_tonf"] - base_stats["total_weight_tonf"]
+        delta_weight_pct = (
+            (delta_weight / base_stats["total_weight_tonf"] * 100)
+            if base_stats["total_weight_tonf"] != 0 else 0
+        )
+        delta_long = var_stats["longitudinal_tonf"] - base_stats["longitudinal_tonf"]
+        delta_trans = var_stats["transverse_tonf"] - base_stats["transverse_tonf"]
+        delta_bar_types = var_stats["unique_bar_types_total"] - base_stats["unique_bar_types_total"]
+        delta_bar_types_pct = (
+            (delta_bar_types / base_stats["unique_bar_types_total"] * 100)
+            if base_stats["unique_bar_types_total"] != 0 else 0
+        )
+
+        delta = {
+            "total_weight_tonf": round(delta_weight, 4),
+            "total_weight_pct": round(delta_weight_pct, 1),
+            "longitudinal_tonf": round(delta_long, 4),
+            "transverse_tonf": round(delta_trans, 4),
+            "unique_bar_types": delta_bar_types,
+            "unique_bar_types_pct": round(delta_bar_types_pct, 1),
+        }
+
+        # Diameter comparison
+        all_diameters = sorted(
+            set(base_stats["diameter_weights_tonf"].keys()) |
+            set(var_stats["diameter_weights_tonf"].keys())
+        )
+        diameter_comparison = {}
+        for dia in all_diameters:
+            b_tonf = base_stats["diameter_weights_tonf"].get(dia, 0)
+            v_tonf = var_stats["diameter_weights_tonf"].get(dia, 0)
+            d_tonf = round(v_tonf - b_tonf, 4)
+            entry = {
+                "baseline_tonf": round(b_tonf, 4),
+                "variant_tonf": round(v_tonf, 4),
+                "delta_tonf": d_tonf,
+            }
+            if b_tonf > 0 and v_tonf == 0:
+                entry["note"] = "eliminated"
+            elif b_tonf == 0 and v_tonf > 0:
+                entry["note"] = "introduced"
+            diameter_comparison[dia] = entry
+
+        # Floor-level comparison
+        base_floor_map = {f["floor"]: f["total_tonf"] for f in base_stats["floors"]}
+        var_floor_map = {f["floor"]: f["total_tonf"] for f in var_stats["floors"]}
+        all_floors = list(dict.fromkeys(
+            [f["floor"] for f in base_stats["floors"]] +
+            [f["floor"] for f in var_stats["floors"]]
+        ))
+        floor_comparison = []
+        for floor_name in all_floors:
+            b_val = base_floor_map.get(floor_name, 0)
+            v_val = var_floor_map.get(floor_name, 0)
+            d_pct = ((v_val - b_val) / b_val * 100) if b_val != 0 else 0
+            floor_comparison.append({
+                "floor": floor_name,
+                "baseline_tonf": round(b_val, 4),
+                "variant_tonf": round(v_val, 4),
+                "delta_pct": round(d_pct, 1),
+            })
+
+        # Strip internal fields from stats before returning
+        for stats in (base_stats, var_stats):
+            stats.pop("floors", None)
+            stats.pop("diameter_weights_tonf", None)
+
+        return {
+            "element_type": element_type,
+            "baseline": base_stats,
+            "variant": var_stats,
+            "delta": delta,
+            "diameter_comparison": diameter_comparison,
+            "floor_comparison": floor_comparison,
+        }
+
+    except Exception as e:
+        logger.error(f"Reinforcement comparison failed: {e}")
+        return {"error": str(e)}
+
+
 @tool
 def list_available_floors(file_path: str = "projects/reinforcement_solution.xlsx") -> Dict[str, Any]:
     """
@@ -1821,7 +2168,8 @@ If no project is specified, fall back to "projects/reinforcement_solution.xlsx".
             temperature=temperature
         )
         self.tools = [list_data_files, review_reinforcement_file,
-                      list_available_floors, generate_procurement_report]
+                      list_available_floors, generate_procurement_report,
+                      compare_reinforcement]
 
         self.agent = create_react_agent(
             self.llm,

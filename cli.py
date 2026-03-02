@@ -9,6 +9,7 @@ Usage:
     python cli.py --scheduling "query"      # Scheduling agent single query
     python cli.py --prodet "query"          # ProDet runner single query
     python cli.py --config "query"          # Config agent single query
+    python cli.py --workflow config-impact mokara "simplify for speed"
 """
 
 import argparse
@@ -241,9 +242,91 @@ def _parse_args():
     parser.add_argument("--scheduling", nargs=argparse.REMAINDER, help="Scheduling agent query")
     parser.add_argument("--prodet", nargs=argparse.REMAINDER, help="ProDet runner query")
     parser.add_argument("--config", nargs=argparse.REMAINDER, help="Config agent query")
+    parser.add_argument("--workflow", nargs=argparse.REMAINDER,
+                        help="Run a workflow (e.g., config-impact mokara 'simplify for speed')")
     parser.add_argument("-p", "--project", type=str, default=None,
                         help="Set active project (data stored in projects/<project>/)")
     return parser
+
+
+def _run_config_impact_workflow(project: str, intent: str) -> int:
+    """Run the Config Impact Analysis workflow with interrupt/resume."""
+    from workflows.config_impact import build_config_impact_workflow
+    from langgraph.types import Command
+
+    print(f"\n{GREEN}━━━ Config Impact Analysis Workflow ━━━{RESET}")
+    print(f"  Project: {YELLOW}{project}{RESET}")
+    print(f"  Intent:  {intent}\n")
+
+    workflow = build_config_impact_workflow()
+    thread_config = {"configurable": {"thread_id": "cli-config-impact-1"}}
+
+    # Phase 1: run until interrupt (load_baseline + propose_changes)
+    print(f"{CYAN}Phase 1:{RESET} Analyzing baseline and proposing changes...")
+    with Spinner("Analyzing config"):
+        result = workflow.invoke(
+            {"project_name": project, "user_intent": intent, "messages": []},
+            config=thread_config,
+        )
+
+    # Check for errors
+    if result.get("error"):
+        print(f"\n{YELLOW}Error:{RESET} {result['error']}")
+        return 1
+
+    # Display proposed changes (from the interrupted state)
+    state = workflow.get_state(thread_config)
+    vals = state.values
+
+    print(f"\n{GREEN}Proposed Changes:{RESET}")
+    print(f"  Target archetype: {BOLD}{vals.get('archetype_target', '?')}{RESET}")
+    print(f"  Rationale: {vals.get('rationale', '?')}")
+    print(f"  Expected impact: {vals.get('expected_impact', '?')}")
+    print(f"\n  Config modifications:")
+    for path, value in vals.get("proposed_changes", {}).items():
+        print(f"    {path} = {value}")
+    print(f"\n  Variant project: {project}_{vals.get('variant_suffix', '?')}")
+
+    # Ask for confirmation
+    print()
+    try:
+        confirm = input(f"{CYAN}Proceed with these changes? [y/N]:{RESET} ").strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        print("\nAborted.")
+        return 0
+
+    if confirm not in ("y", "yes"):
+        print("Workflow cancelled.")
+        # Resume with False to route to END
+        workflow.invoke(Command(resume=False), config=thread_config)
+        return 0
+
+    # Phase 2: resume with confirmation → create variant → run ProDet → compare → narrate
+    print(f"\n{CYAN}Phase 2:{RESET} Creating variant and running ProDet...")
+    print("  (This may take several minutes per ProDet run)\n")
+
+    result = workflow.invoke(Command(resume=True), config=thread_config)
+
+    # Check for errors
+    if result.get("error"):
+        print(f"\n{YELLOW}Error:{RESET} {result['error']}")
+        return 1
+
+    # Display the narrative
+    narrative = result.get("narrative", "")
+    if narrative:
+        print(f"\n{GREEN}{'=' * 60}{RESET}")
+        print(f"{GREEN}  Config Impact Analysis — Trade-off Report{RESET}")
+        print(f"{GREEN}{'=' * 60}{RESET}\n")
+        print(narrative)
+        print(f"\n{GREEN}{'=' * 60}{RESET}")
+    else:
+        print(f"\n{YELLOW}No narrative generated.{RESET}")
+        # Print whatever messages we have
+        for msg in result.get("messages", []):
+            print(f"  {msg}")
+
+    return 0
 
 
 def main():
@@ -253,6 +336,28 @@ def main():
     args = parser.parse_args()
 
     active_project = args.project
+
+    # Workflow mode
+    if args.workflow is not None:
+        wf_args = args.workflow
+        if len(wf_args) < 2:
+            print(f"{YELLOW}Usage:{RESET} --workflow <workflow-name> <project> <intent...>")
+            print(f"  Example: --workflow config-impact mokara \"simplify for speed\"")
+            return 1
+        workflow_name = wf_args[0]
+        project = wf_args[1]
+        intent = " ".join(wf_args[2:]) if len(wf_args) > 2 else ""
+
+        if workflow_name == "config-impact":
+            if not intent:
+                print(f"{YELLOW}Error:{RESET} config-impact workflow requires an intent string.")
+                print(f"  Example: --workflow config-impact mokara \"simplify for faster construction\"")
+                return 1
+            return _run_config_impact_workflow(project, intent)
+        else:
+            print(f"{YELLOW}Unknown workflow:{RESET} {workflow_name}")
+            print(f"  Available workflows: config-impact")
+            return 1
 
     # Single-query mode: detect which agent flag was used
     agent_modes = [
