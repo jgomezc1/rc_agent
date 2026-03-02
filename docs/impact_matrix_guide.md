@@ -40,8 +40,11 @@ Direction shows what happens when moving from **Simple → Optimized** profile.
 | **F** Drawings | — none | — none | ± mixed | — low | — none | ★ primary | ± low | — none |
 | **G** Code Basis | ★ fixed | — low | ★ fixed | ★ fixed | ★ fixed | — low | ★ fixed | — low |
 | **H** Materials | ↕ complex | ↑ low | ↑ med-high | — none | ↑ low | — none | ↑ med | — none |
+| **Floor Grouping** | ↑ med | ↓ med | ↓ low | ↑↑ high | ↓ low | ↑ low | ↓ low | ↓ low |
 
 **Legend:** ↓ = decreases, ↑ = increases, ↓↓ = strong decrease, ↑↑↑ = very strong increase, — = neutral/negligible, ± = mixed/context-dependent, ★ = fixed by code or is the primary cluster for that dimension, ↕ = depends on market conditions
+
+**Note on Floor Grouping row:** Direction shows what happens when enabling grouping (no grouping → aggressive grouping). Steel increases (envelope), piece count decreases (same bars across floors), speed increases significantly (crew repetition and learning curve).
 
 ---
 

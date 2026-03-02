@@ -15,6 +15,7 @@ Usage:
     response = agent.run("What projects are available?")
 """
 
+import json
 import os
 import sys
 import shutil
@@ -42,6 +43,13 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 from paths import RC_AGENT_ROOT, RC_AGENT_PROJECTS, project_dir, normalize_path
+
+# Config agent helpers — used by _create_variant_config and re-exported as tools
+from config_agent import (
+    load_config_summary, update_config,
+    _resolve_config_path, _get_nested, _set_nested,
+    _maybe_convert_calibre, _LONG_HOMOG_MAP,
+)
 
 # =============================================================================
 # Configuration (from .env with defaults)
@@ -617,6 +625,261 @@ def run_data_pipeline(
 
 
 # =============================================================================
+# Parametric Study Helpers
+# =============================================================================
+
+_COMPANION_FILES = ["project.prodes", "project.geom", "project.cargas"]
+
+
+def _create_variant_config(
+    source_project: str,
+    suffix: str,
+    changes: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Create a variant project folder with a modified config.
+
+    Reads the source project's project.config, applies dot-path changes,
+    writes the result to projects/<source>_<suffix>/project.config, and
+    copies companion files (prodes, geom, cargas) if not already present.
+
+    Returns a dict with success flag, variant_project name, and details.
+    """
+    try:
+        source_config_path = _resolve_config_path(source_project)
+        if not os.path.isfile(source_config_path):
+            return {"error": f"Source config not found for project '{source_project}'"}
+
+        with open(source_config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        # Apply changes
+        applied = []
+        errors = []
+        for dot_path, new_value in changes.items():
+            try:
+                old_value = _get_nested(config, dot_path)
+                new_value = _maybe_convert_calibre(new_value, dot_path)
+                _set_nested(config, dot_path, new_value)
+                applied.append({"path": dot_path, "old": old_value, "new": new_value})
+            except KeyError as e:
+                errors.append({"path": dot_path, "error": str(e)})
+
+        if errors and not applied:
+            return {"error": "No changes applied — all paths invalid", "invalid_paths": errors}
+
+        # Create variant project folder
+        variant_name = f"{source_project}_{suffix}"
+        variant_dir = project_dir(variant_name)
+        variant_config_path = os.path.join(variant_dir, "project.config")
+
+        with open(variant_config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+
+        # Copy companion files from source directory
+        src_dir = os.path.dirname(source_config_path)
+        copied = []
+        for fname in _COMPANION_FILES:
+            src_file = os.path.join(src_dir, fname)
+            dst_file = os.path.join(variant_dir, fname)
+            if os.path.isfile(src_file) and not os.path.isfile(dst_file):
+                shutil.copy2(src_file, dst_file)
+                copied.append(fname)
+
+        result = {
+            "success": True,
+            "variant_project": variant_name,
+            "variant_dir": variant_dir,
+            "config_path": variant_config_path,
+            "changes_applied": applied,
+            "companion_files_copied": copied,
+        }
+        if errors:
+            result["warnings"] = errors
+        return result
+
+    except Exception as e:
+        logger.error(f"Error creating variant config: {e}")
+        return {"error": str(e)}
+
+
+@tool
+def run_parametric_study(
+    source_project: str,
+    variants_json: str,
+    element_type: str = "vigas",
+    run_prodet_flag: bool = True,
+    run_pipeline_flag: bool = True,
+    timeout_per_run: int = 900,
+) -> Dict[str, Any]:
+    """
+    Run a parametric study: create config variants and execute ProDet for each.
+
+    Takes a source project, creates multiple variant projects with modified
+    configs, and optionally runs ProDet + the data pipeline for each variant.
+    This is a batch operation — one tool call handles the entire loop.
+
+    Use this when the user wants to compare multiple config variations, e.g.
+    different cutting lengths, calibre ranges, or detailing parameters.
+
+    The variants_json parameter is a JSON list of objects, each with:
+      - "suffix": short label appended to source project name (e.g. "lh10cm")
+      - "changes": dict of dot-path keys to new values
+
+    Example variants_json:
+      [
+        {"suffix": "lh10cm",  "changes": {"vigas.param_despiece.long_homog": 0}},
+        {"suffix": "lh50cm",  "changes": {"vigas.param_despiece.long_homog": 1}},
+        {"suffix": "lh100cm", "changes": {"vigas.param_despiece.long_homog": 2}}
+      ]
+
+    This creates projects/mokara_lh10cm/, projects/mokara_lh50cm/, etc.
+    Each variant folder gets a modified project.config plus companion files.
+
+    Error handling: continue-on-failure. If variant N fails, the error is
+    logged and the study continues with variant N+1.
+
+    Args:
+        source_project: Name of the source project (e.g. "mokara").
+        variants_json: JSON list of {suffix, changes} objects.
+        element_type: Element type for ProDet runs (default: "vigas").
+        run_prodet_flag: Whether to run ProDet for each variant (default: True).
+        run_pipeline_flag: Whether to run the data pipeline after ProDet (default: True).
+        timeout_per_run: Max seconds per ProDet run (default: 900).
+
+    Returns:
+        Dictionary with overall summary and per-variant status.
+    """
+    try:
+        # Parse variants
+        try:
+            variants = json.loads(variants_json)
+        except json.JSONDecodeError as e:
+            return {"error": f"Invalid JSON in variants_json: {e}"}
+
+        if not isinstance(variants, list) or len(variants) == 0:
+            return {"error": "variants_json must be a non-empty JSON list"}
+
+        results = []
+        total = len(variants)
+        succeeded = 0
+        failed = 0
+
+        for i, variant in enumerate(variants, 1):
+            suffix = variant.get("suffix", f"v{i}")
+            changes = variant.get("changes", {})
+            variant_name = f"{source_project}_{suffix}"
+
+            logger.info(f"[Parametric {i}/{total}] Creating variant: {variant_name}")
+            variant_result = {"suffix": suffix, "variant_project": variant_name, "steps": {}}
+
+            # Step 1: Create variant config
+            config_res = _create_variant_config(source_project, suffix, changes)
+            variant_result["steps"]["create_config"] = config_res
+
+            if not config_res.get("success"):
+                variant_result["success"] = False
+                variant_result["error"] = config_res.get("error", "Config creation failed")
+                failed += 1
+                results.append(variant_result)
+                continue
+
+            variant_dir = config_res["variant_dir"]
+
+            # Step 2: Run ProDet
+            if run_prodet_flag:
+                logger.info(f"[Parametric {i}/{total}] Running ProDet for {variant_name}...")
+                prodet_res = _run_prodet_single(variant_dir, element_type, timeout_per_run)
+                variant_result["steps"]["run_prodet"] = prodet_res
+
+                if not prodet_res.get("success"):
+                    variant_result["success"] = False
+                    variant_result["error"] = prodet_res.get("error", "ProDet run failed")
+                    failed += 1
+                    results.append(variant_result)
+                    continue
+
+                # Step 3: Copy output (rename to reinforcement_solution.xlsx)
+                output_path = prodet_res.get("output_file")
+                if output_path and os.path.isfile(output_path):
+                    dest = os.path.join(variant_dir, "reinforcement_solution.xlsx")
+                    if os.path.abspath(output_path) != os.path.abspath(dest):
+                        shutil.copy2(output_path, dest)
+                    variant_result["steps"]["copy_output"] = {
+                        "success": True,
+                        "source": output_path,
+                        "destination": dest,
+                    }
+
+            # Step 4: Run data pipeline
+            if run_pipeline_flag and run_prodet_flag:
+                xlsx_path = os.path.join(variant_dir, "reinforcement_solution.xlsx")
+                if os.path.isfile(xlsx_path):
+                    logger.info(f"[Parametric {i}/{total}] Running pipeline for {variant_name}...")
+                    pipeline_script = os.path.join(RC_AGENT_ROOT, "run_rebar_pipeline.py")
+                    try:
+                        pipe_result = subprocess.run(
+                            [sys.executable, pipeline_script, "-x", xlsx_path, "-d", variant_dir],
+                            cwd=RC_AGENT_ROOT,
+                            capture_output=True,
+                            text=True,
+                            timeout=120,
+                        )
+                        # Check artifacts
+                        artifacts = {}
+                        for artifact_name in PIPELINE_ARTIFACTS:
+                            artifact_path = os.path.join(variant_dir, artifact_name)
+                            artifacts[artifact_name] = os.path.isfile(artifact_path)
+
+                        # Ensure dashboard was generated (pipeline wraps it
+                        # in try/except so it can fail silently)
+                        dashboard_path = os.path.join(variant_dir, "dashboard.html")
+                        if not os.path.isfile(dashboard_path):
+                            try:
+                                from visualization import generate_dashboard
+                                generate_dashboard(project_path=variant_dir, auto_open=False)
+                            except Exception as dash_err:
+                                logger.warning(f"Dashboard generation failed for {variant_name}: {dash_err}")
+                        artifacts["dashboard.html"] = os.path.isfile(dashboard_path)
+
+                        variant_result["steps"]["pipeline"] = {
+                            "success": pipe_result.returncode == 0,
+                            "return_code": pipe_result.returncode,
+                            "artifacts": artifacts,
+                            "stderr": pipe_result.stderr[-500:] if pipe_result.stderr else "",
+                        }
+                    except subprocess.TimeoutExpired:
+                        variant_result["steps"]["pipeline"] = {
+                            "success": False,
+                            "error": "Pipeline timed out after 120s",
+                        }
+
+            # Determine overall variant success
+            steps = variant_result["steps"]
+            variant_result["success"] = all(
+                s.get("success", False) for s in steps.values()
+            )
+            if variant_result["success"]:
+                succeeded += 1
+            else:
+                failed += 1
+
+            results.append(variant_result)
+
+        return {
+            "source_project": source_project,
+            "element_type": element_type,
+            "total_variants": total,
+            "succeeded": succeeded,
+            "failed": failed,
+            "variants": results,
+        }
+
+    except Exception as e:
+        logger.error(f"Error in parametric study: {e}")
+        return {"error": str(e)}
+
+
+# =============================================================================
 # ProDet Agent
 # =============================================================================
 
@@ -664,6 +927,52 @@ You help users run ProDet (a reinforced concrete design tool) on project files a
 5. **run_data_pipeline** — Run the full rebar pipeline (reinforcement_parser ->
    complexity_index -> productivity -> work_packages -> floor_schedule) to
    generate the 5 JSON artifacts used by the other agents.
+
+6. **load_config_summary** — Read a project.config and return a curated
+   summary of the ~30 engineering-relevant parameters. Pass either a full
+   path or just the project name (e.g. "mokara").
+
+7. **update_config** — Apply dot-path keyed changes to an existing config
+   file. Automatically copies companion files when writing to a new folder.
+   Example changes_json: {"vigas.param_despiece.long_homog": 1}
+
+8. **run_parametric_study** — Batch tool: create multiple config variants
+   and run ProDet + pipeline for each. ONE tool call handles the entire loop.
+   Pass variants_json as a JSON list of {suffix, changes} objects.
+
+== PARAMETRIC STUDY WORKFLOW ==
+
+When a user asks to compare multiple configurations (e.g. different cutting
+lengths, calibre ranges, or detailing parameters):
+
+1. Decompose the request into a list of variants, each with a suffix and
+   dot-path changes.
+2. Call **run_parametric_study** ONCE with all variants.
+3. Report per-variant results (config created, ProDet success, pipeline
+   artifacts).
+
+Example: "Create configs for mokara with cutting lengths 0.10m, 0.50m, 1.0m
+and run ProDet for each for vigas" →
+
+  run_parametric_study(
+    source_project="mokara",
+    variants_json='[
+      {"suffix": "lh10cm",  "changes": {"vigas.param_despiece.long_homog": 0}},
+      {"suffix": "lh50cm",  "changes": {"vigas.param_despiece.long_homog": 1}},
+      {"suffix": "lh100cm", "changes": {"vigas.param_despiece.long_homog": 2}}
+    ]',
+    element_type="vigas"
+  )
+
+== LONG_HOMOG PARAMETER MAPPING ==
+
+The long_homog parameter controls bar cutting length multiples:
+  0 → 0.10 m (10 cm multiples)
+  1 → 0.50 m (50 cm multiples)
+  2 → 1.00 m (100 cm multiples)
+
+This applies per element type: vigas.param_despiece.long_homog,
+nervios.param_despiece.long_homog, columnas.param_despiece.long_homog.
 
 == ELEMENT TYPES ==
 
@@ -763,6 +1072,9 @@ For example, running ProDet for project "mokara" stores files in projects/mokara
             run_prodet,
             copy_output_to_rc_agent,
             run_data_pipeline,
+            load_config_summary,
+            update_config,
+            run_parametric_study,
         ]
 
         self.agent = create_react_agent(
@@ -775,7 +1087,7 @@ For example, running ProDet for project "mokara" stores files in projects/mokara
         self,
         user_input: str,
         chat_history: Optional[List] = None,
-        max_iterations: int = 15,
+        max_iterations: int = 80,
     ) -> str:
         """
         Run the ProDet agent on a user query.
@@ -783,7 +1095,11 @@ For example, running ProDet for project "mokara" stores files in projects/mokara
         Args:
             user_input: The user's question or request.
             chat_history: Optional list of previous messages for context.
-            max_iterations: Maximum number of agent iterations (default: 15).
+            max_iterations: Maximum number of agent iterations (default: 80).
+                           Higher than other agents because parametric studies
+                           require many reasoning + tool-call turns
+                           (config inspection, variant creation, ProDet runs,
+                           result loading and comparison across variants).
 
         Returns:
             The final assistant message content as a string.

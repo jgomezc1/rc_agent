@@ -113,14 +113,14 @@ AGENTS = {
     },
     '4': {
         'name': 'ProDet Runner',
-        'description': 'Run ProDet, copy output, and process the data pipeline',
+        'description': 'Run ProDet, manage configs, and process the data pipeline',
         'module': 'prodet_agent',
         'class': 'ProDetAgent',
         'examples': [
             'What projects are available?',
             'Inspect the mokara project',
             'Run ProDet for mokara and process the output',
-            'Run the data pipeline on the current xlsx'
+            'Run a parametric study on mokara with cutting lengths 0.10m, 0.50m, 1.0m for vigas'
         ]
     },
     '5': {

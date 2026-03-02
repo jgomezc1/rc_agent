@@ -181,6 +181,18 @@ def main() -> None:
 
     run_step(schedule_cmd, "schedule_tool")
 
+    # 6) Generate interactive HTML dashboard
+    try:
+        from visualization import generate_dashboard
+
+        dashboard_path = generate_dashboard(
+            project_path=data_dir,
+            auto_open=False,
+        )
+        logger.info("Dashboard generated: %s", dashboard_path)
+    except Exception as e:
+        logger.warning("Dashboard generation skipped: %s", e)
+
     logger.info("Pipeline completed successfully.")
     logger.info("Final floor schedule: %s", floor_schedule_json)
 

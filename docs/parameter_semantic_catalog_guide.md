@@ -169,6 +169,36 @@ These clusters are largely **non-negotiable** — they're set by the structural 
 
 ---
 
+## Floor Grouping (grupos_niveles) — Project-Level Strategy
+
+**What it controls:** Which floors are grouped together to receive identical reinforcement computed from the envelope of forces across the group.
+
+**The fundamental trade-off:** Floor grouping trades material efficiency (envelope produces heavier reinforcement than per-floor optimization) for construction speed (crew repetition, learning curve, fewer drawing sets, simpler logistics). This is a project-level decision, not a per-parameter tuning.
+
+### Trade-off Table
+
+| Strategy | Steel Impact | Piece Count | Speed Impact | Best For |
+|----------|-------------|-------------|-------------|----------|
+| No grouping | Baseline | Baseline | Baseline | Low-rise, unique floors |
+| Moderate (pairs) | +2-4% | -15-25% | +15-25% | Mid-rise with some identical floors |
+| Aggressive (4+ per group) | +5-8% | -30-50% | +30-50% | High-rise towers with many typical floors |
+
+### Cluster Interactions
+
+- **Synergistic with Cluster E** (per-level overrides disabled): Grouping + no overrides = maximum repetition. This is the ideal combination for High-Rise Repetitive (Arch-04).
+- **Compounds with Archetype 4**: Floor grouping is the natural complement to the High-Rise Repetitive archetype.
+- **Contradicts aggressive Cluster A**: Wide bar range + grouping means the envelope picks the heaviest bar from ANY floor in the group — diminishing returns on material optimization.
+- **Neutral with Clusters B, C, D, F**: Floor grouping doesn't directly interact with splice strategy, stirrup config, merging tolerances, or drawing format.
+
+### Constraints
+
+- Only consecutive floors can be grouped
+- Only geometrically identical floors (same column layout, beam spans, slab geometry)
+- Mode is always "envolvente" (envelope of forces)
+- Transfer floors, mezzanines, roof/machine room, and podium levels should NOT be grouped with typical floors
+
+---
+
 ## Overall Config Profile Assessment
 
 The Mokara project.config falls in the **balanced-to-simple** range:

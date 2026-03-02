@@ -261,6 +261,26 @@ def _summarize_element(config: dict, element_key: str) -> Optional[dict]:
     return summary
 
 
+def _extract_floor_names(config: dict) -> List[str]:
+    """Extract the ordered list of floor names from a parsed config dict.
+
+    Searches vigas.param_despiece.forzar_ref_ppal.por_nivel first (most
+    reliable source), then falls back to nervios, then columnas.
+    Returns floor names in config order (top-to-bottom as stored).
+    """
+    for element_key in ("vigas", "nervios", "columnas"):
+        elem = config.get(element_key, {})
+        por_nivel = (
+            elem
+            .get("param_despiece", {})
+            .get("forzar_ref_ppal", {})
+            .get("por_nivel", {})
+        )
+        if isinstance(por_nivel, dict) and por_nivel:
+            return list(por_nivel.keys())
+    return []
+
+
 # =============================================================================
 # LangChain Tools
 # =============================================================================
@@ -312,6 +332,27 @@ def load_config_summary(config_path: str) -> Dict[str, Any]:
             summary = _summarize_element(config, etype)
             if summary:
                 result["element_types"][etype] = summary
+
+        # Floor names (ordered as stored in config — top-to-bottom)
+        result["floors"] = _extract_floor_names(config)
+
+        # Floor groups (grupos_niveles)
+        raw_groups = config.get("grupos_niveles", [])
+        if raw_groups:
+            result["floor_groups"] = [
+                {
+                    "id": g.get("id", ""),
+                    "floors": g.get("niveles", []),
+                    "mode": g.get("modoAgrupacion", "envolvente"),
+                }
+                for g in raw_groups
+            ]
+        else:
+            result["floor_groups"] = []
+            result["floor_groups_note"] = (
+                "No floor grouping defined. Use set_floor_groups to create "
+                "groups of geometrically identical floors."
+            )
 
         return result
 
@@ -444,6 +485,198 @@ def update_config(
         return {"error": str(e)}
 
 
+@tool
+def set_floor_groups(
+    config_path: str,
+    groups_json: str,
+    identical_range_start: str,
+    identical_range_end: str,
+    output_path: str = "",
+) -> Dict[str, Any]:
+    """
+    Create or replace floor-level groupings (grupos_niveles) in a project.config.
+
+    Groups geometrically identical floors so they receive identical reinforcement
+    computed from the envelope of forces. Each group must contain ≥2 consecutive
+    floors within the declared identical range.
+
+    IMPORTANT: Before calling this tool you MUST ask the user which floors are
+    geometrically identical. Pass their answer as identical_range_start/end.
+
+    Args:
+        config_path: Project name or path to project.config (e.g. "supernovaA").
+        groups_json: JSON list of groups, each a list of floor names.
+                     Example: '[["05_Niv3","06_Niv4"],["07_Niv5","08_Niv6"]]'
+        identical_range_start: First floor in the user-declared identical range
+                               (e.g. "05_Niv3"). This is the topmost floor in
+                               config order that the user confirmed as identical.
+        identical_range_end: Last floor in the user-declared identical range
+                             (e.g. "08_Niv6"). This is the bottommost floor.
+        output_path: New project name for output (e.g. "supernovaA_grouped").
+                     If empty, overwrites the source config. IMPORTANT: always
+                     use a new name to protect the seed config.
+
+    Returns:
+        Dictionary with success flag, generated grupos_niveles, validation
+        details, and output path.
+    """
+    try:
+        resolved_input = _resolve_config_path(config_path)
+        if not os.path.isfile(resolved_input):
+            return {"error": f"Config file not found: {config_path} (tried {resolved_input})"}
+
+        with open(resolved_input, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        # Parse groups
+        try:
+            groups = json.loads(groups_json)
+        except json.JSONDecodeError as e:
+            return {"error": f"Invalid JSON in groups_json: {e}"}
+
+        if not isinstance(groups, list) or not all(isinstance(g, list) for g in groups):
+            return {"error": "groups_json must be a JSON list of lists (e.g. [[\"A\",\"B\"],[\"C\",\"D\"]])"}
+
+        # Extract ordered floor names from config
+        all_floors = _extract_floor_names(config)
+        if not all_floors:
+            return {"error": "Could not extract floor names from config. The config may be missing per-level data."}
+
+        # ── Validation layer 1: All floor names exist ──
+        all_floor_set = set(all_floors)
+        unknown = []
+        for gi, group in enumerate(groups):
+            for fname in group:
+                if fname not in all_floor_set:
+                    unknown.append({"group": gi + 1, "floor": fname})
+        if unknown:
+            return {
+                "error": "Unknown floor names — not found in config",
+                "unknown_floors": unknown,
+                "available_floors": all_floors,
+            }
+
+        # Validate range endpoints exist
+        if identical_range_start not in all_floor_set:
+            return {"error": f"identical_range_start '{identical_range_start}' not found in config floors", "available_floors": all_floors}
+        if identical_range_end not in all_floor_set:
+            return {"error": f"identical_range_end '{identical_range_end}' not found in config floors", "available_floors": all_floors}
+
+        # Determine the identical range as a slice of all_floors
+        idx_start = all_floors.index(identical_range_start)
+        idx_end = all_floors.index(identical_range_end)
+        # Ensure start comes before or at end in list order
+        if idx_start > idx_end:
+            idx_start, idx_end = idx_end, idx_start
+        identical_range_floors = set(all_floors[idx_start:idx_end + 1])
+
+        # ── Validation layer 2: HARD GATE — all floors within identical range ──
+        outside = []
+        for gi, group in enumerate(groups):
+            for fname in group:
+                if fname not in identical_range_floors:
+                    outside.append({"group": gi + 1, "floor": fname})
+        if outside:
+            return {
+                "error": "Floors outside the declared identical range. All grouped floors must be within the range the user confirmed as geometrically identical.",
+                "floors_outside_range": outside,
+                "identical_range": all_floors[idx_start:idx_end + 1],
+            }
+
+        # ── Validation layer 3: Floors within each group are consecutive ──
+        non_consecutive = []
+        for gi, group in enumerate(groups):
+            indices = sorted(all_floors.index(f) for f in group)
+            for j in range(1, len(indices)):
+                if indices[j] != indices[j - 1] + 1:
+                    non_consecutive.append({
+                        "group": gi + 1,
+                        "floors": group,
+                        "note": "Floors must be consecutive in the building (no gaps)",
+                    })
+                    break
+        if non_consecutive:
+            return {
+                "error": "Non-consecutive floors in group(s)",
+                "non_consecutive": non_consecutive,
+                "floor_order": all_floors,
+            }
+
+        # ── Validation layer 4: Each group has ≥2 floors ──
+        too_small = [{"group": gi + 1, "size": len(g)} for gi, g in enumerate(groups) if len(g) < 2]
+        if too_small:
+            return {"error": "Each group must have at least 2 floors", "too_small": too_small}
+
+        # ── Validation layer 5: No floor appears in more than one group ──
+        seen = {}
+        duplicates = []
+        for gi, group in enumerate(groups):
+            for fname in group:
+                if fname in seen:
+                    duplicates.append({"floor": fname, "groups": [seen[fname], gi + 1]})
+                else:
+                    seen[fname] = gi + 1
+        if duplicates:
+            return {"error": "Floor(s) appear in multiple groups", "duplicates": duplicates}
+
+        # ── Generate grupos_niveles array ──
+        grupos_niveles = []
+        for group in groups:
+            grupos_niveles.append({
+                "id": ", ".join(group),
+                "niveles": list(group),
+                "modoAgrupacion": "envolvente",
+            })
+
+        config["grupos_niveles"] = grupos_niveles
+
+        # Determine output path
+        if output_path:
+            resolved_output = _resolve_config_path(output_path)
+            if resolved_output == output_path and not output_path.endswith(".config"):
+                from paths import project_dir
+                out_dir = project_dir(output_path)
+                resolved_output = os.path.join(out_dir, "project.config")
+        else:
+            resolved_output = resolved_input
+
+        # Write
+        out_dir = os.path.dirname(resolved_output)
+        os.makedirs(out_dir, exist_ok=True)
+        with open(resolved_output, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+
+        # Copy immutable companion files if output is in a different directory
+        _COMPANION_FILES = ["project.cargas", "project.geom", "project.prodes"]
+        copied_files = []
+        src_dir = os.path.dirname(resolved_input)
+        if os.path.normpath(src_dir) != os.path.normpath(out_dir):
+            for fname in _COMPANION_FILES:
+                src_file = os.path.join(src_dir, fname)
+                dst_file = os.path.join(out_dir, fname)
+                if os.path.isfile(src_file) and not os.path.isfile(dst_file):
+                    shutil.copy2(src_file, dst_file)
+                    copied_files.append(fname)
+
+        result = {
+            "success": True,
+            "grupos_niveles": grupos_niveles,
+            "group_count": len(grupos_niveles),
+            "total_grouped_floors": sum(len(g) for g in groups),
+            "identical_range": all_floors[idx_start:idx_end + 1],
+            "output_path": resolved_output,
+            "source_path": resolved_input,
+        }
+        if copied_files:
+            result["copied_companion_files"] = copied_files
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error setting floor groups: {e}")
+        return {"error": str(e)}
+
+
 # =============================================================================
 # Config Agent
 # =============================================================================
@@ -464,9 +697,19 @@ class ConfigAgent:
 
 == AVAILABLE TOOLS ==
 
-1. **load_config_summary** — Reads a project.config and returns a curated summary of the ~30 engineering-relevant parameters. Pass either a full path or just the project name (e.g. "mokara").
+1. **load_config_summary** — Reads a project.config and returns a curated summary of the ~30 engineering-relevant parameters, plus the ordered floor list and any existing floor groups. Pass either a full path or just the project name (e.g. "mokara").
 
 2. **update_config** — Applies dot-path changes to a config file. Pass the template config path, a JSON string of changes, and optionally an output path.
+
+3. **set_floor_groups** — Creates or replaces floor-level groupings (grupos_niveles) in a config. Groups geometrically identical floors so they receive identical reinforcement from the envelope of forces.
+   **CRITICAL WORKFLOW:** You MUST follow this sequence:
+   a. Call `load_config_summary` to get the floor list and any existing groups
+   b. Show the floor list to the user
+   c. ASK the user which floors are geometrically identical (never assume!)
+   d. Propose groups and explain the trade-offs
+   e. After user confirmation, call `set_floor_groups` with the groups and the user-declared identical range
+   f. Verify with `load_config_summary` on the output
+   The `identical_range_start` and `identical_range_end` params enforce that you obtained the identical-range information from the user before calling the tool.
 
 == CONSTRUCTION REASONING FRAMEWORK ==
 
@@ -522,6 +765,38 @@ Effect: Drawing clarity context-dependent. por_piso best for floor-by-floor cons
 Non-tunable clusters (project-given):
 - **Cluster G — Code & Design Basis**: demanda, covers, strain limits — set by NSR-10 and seismic zone
 - **Cluster H — Material Specification**: fy, fc, E — structural design inputs
+
+=== Floor Grouping Strategy (grupos_niveles) ===
+
+Floor grouping is a PROJECT-LEVEL strategy that groups geometrically identical floors so ProDet computes reinforcement from the envelope of forces across the group. Every floor in the group receives the same rebar layout — the heaviest needed by any floor in the group.
+
+**The core trade-off:**
+- More material (envelope forces produce heavier reinforcement than per-floor optimization)
+- Faster construction (crew repetition, learning curve, fewer drawing sets, simpler logistics)
+- In high-rise with 4+ identical floors, the construction speed gains typically outweigh the 3-8% extra steel
+
+**Interaction with parameter clusters:**
+- SYNERGISTIC with Cluster E (per-level overrides disabled): grouping + no overrides = maximum repetition. This is the ideal combination for High-Rise Repetitive (Arch-04).
+- COMPOUNDS with Archetype 4: floor grouping is the natural complement to the High-Rise Repetitive archetype. Recommend them together.
+- CONTRADICTS aggressive Cluster A optimization: wide bar range + grouping means the envelope picks the heaviest bar from ANY floor in the group — diminishing returns on optimization.
+
+**Constraints:**
+- Only consecutive floors can be grouped (no skipping)
+- Only geometrically identical floors (same column layout, same beam spans, same slab geometry)
+- Mode is always "envolvente" (envelope) — the only mode currently supported
+- Each floor can belong to at most one group
+
+**When to recommend grouping:**
+- High-rise with ≥4 geometrically identical typical floors
+- Schedule-driven projects where crew learning curve matters
+- Projects already using Arch-04 (High-Rise Repetitive)
+
+**When NOT to recommend grouping:**
+- Transfer floors (different structural system)
+- Mezzanines (different geometry)
+- Roof/machine room levels (different loads)
+- Podium levels (different column layout)
+- Floors with significantly different loads (e.g., parking vs residential)
 
 === Critical Interaction Warnings ===
 
@@ -829,6 +1104,15 @@ When the user says "3/4 bars", that means calibre index 4.
 - When calling `update_config`, always pass a new project name as `output_path` (e.g. "mokara_speed", "mokara_v2"). The tool will automatically create the new folder and copy the companion files from the source project so the new folder is immediately runnable by ProDet.
 - Do NOT reference `prodet_locales/` — that path is obsolete. All project folders live under `projects/`.
 
+### For setting up floor groups:
+1. Call `load_config_summary` to get the floor list and any existing groups
+2. Present the floor list to the user in order
+3. Ask the user: "Which of these floors are geometrically identical?" (same column layout, beam spans, slab geometry) — NEVER assume this
+4. Based on the user's answer, propose groups (e.g., pairs or triplets of consecutive floors)
+5. Explain the trade-off: envelope reinforcement means ~3-8% more steel but identical rebar layouts for crew repetition
+6. After user confirmation, call `set_floor_groups` with the groups, identical range start/end, and a NEW output project name
+7. Verify the result by calling `load_config_summary` on the output project
+
 ### For hybrid requests (e.g., "make it simpler but keep splices optimized"):
 1. Select primary archetype from the dominant goal
 2. Identify the secondary cluster-level adjustment
@@ -838,6 +1122,18 @@ When the user says "3/4 bars", that means calibre index 4.
 ### When the request is ambiguous:
 Ask a clarifying question framed as a trade-off: "Do you prioritize construction speed or material savings? The answer determines whether we narrow the bar range (faster, +10% steel) or widen it (slower, -10% steel)."
 
+== PARAMETER REFERENCE — grupos_niveles ==
+
+Top-level key `grupos_niveles` — an array of group objects:
+```json
+[{"id": "05_Niv3, 06_Niv4", "niveles": ["05_Niv3", "06_Niv4"], "modoAgrupacion": "envolvente"}]
+```
+- `id`: display label (comma-separated floor names)
+- `niveles`: list of floor names in the group
+- `modoAgrupacion`: always "envolvente" (envelope of forces)
+
+**Do NOT modify grupos_niveles via `update_config`.** Always use the `set_floor_groups` tool, which provides validation.
+
 == WHAT NOT TO MODIFY ==
 
 Never modify these through update_config — they are code-derived tables:
@@ -845,6 +1141,7 @@ Never modify these through update_config — they are code-derived tables:
 - Standard libraries: top-level "calibres" and "materiales" arrays
 - Drawing config: the "planos" section
 - Per-section/per-floor overrides (por_seccion, por_nivel) — these are managed by ProDet's UI
+- Floor groups (grupos_niveles) — use the `set_floor_groups` tool instead
 """
 
     def __init__(self, model_name: str = None, temperature: float = 0.0):
@@ -857,6 +1154,7 @@ Never modify these through update_config — they are code-derived tables:
         self.tools = [
             load_config_summary,
             update_config,
+            set_floor_groups,
         ]
         self.agent = create_react_agent(
             self.llm,
