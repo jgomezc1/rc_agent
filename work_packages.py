@@ -42,6 +42,8 @@ def map_element_to_work_type(element: Dict) -> str:
 
     if element_type == "beam":
         return "rebar_beams"
+    elif element_type == "joist":
+        return "rebar_joists"
     elif element_type == "column":
         return "rebar_columns"
     elif element_type == "wall":

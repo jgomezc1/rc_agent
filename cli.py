@@ -326,6 +326,12 @@ def _run_config_impact_workflow(project: str, intent: str) -> int:
         for msg in result.get("messages", []):
             print(f"  {msg}")
 
+    structubim_path = result.get("structubim_output")
+    if structubim_path:
+        print(f"\n{CYAN}StructuBim Output:{RESET}")
+        print(f"  File: {structubim_path}")
+        print(f"  Upload to structu-bim.com to visualize 3D reinforcement comparison")
+
     return 0
 
 
@@ -337,7 +343,7 @@ def main():
 
     active_project = args.project
 
-    # Workflow mode
+    # Workflow mode — run workflow first, then fall through to interactive menu
     if args.workflow is not None:
         wf_args = args.workflow
         if len(wf_args) < 2:
@@ -353,7 +359,12 @@ def main():
                 print(f"{YELLOW}Error:{RESET} config-impact workflow requires an intent string.")
                 print(f"  Example: --workflow config-impact mokara \"simplify for faster construction\"")
                 return 1
-            return _run_config_impact_workflow(project, intent)
+            result = _run_config_impact_workflow(project, intent)
+            if result != 0:
+                return result
+            # Set active project to the one used in the workflow
+            active_project = project
+            # Fall through to interactive menu
         else:
             print(f"{YELLOW}Unknown workflow:{RESET} {workflow_name}")
             print(f"  Available workflows: config-impact")

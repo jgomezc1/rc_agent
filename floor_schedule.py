@@ -30,6 +30,7 @@ DEFAULT_HOURS_PER_DAY = 8.0
 
 DEFAULT_CREWS_PER_WORK_TYPE = {
     "rebar_beams": 2,
+    "rebar_joists": 2,
     "rebar_columns": 1,
     "rebar_walls": 1,
     "rebar_slabs": 2,

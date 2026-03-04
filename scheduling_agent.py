@@ -42,9 +42,14 @@ logger = logging.getLogger(__name__)
 try:
     import plotly.graph_objects as go
     PLOTLY_AVAILABLE = True
-except ImportError:
+except Exception as e:
     PLOTLY_AVAILABLE = False
-    logger.warning("plotly not installed. Gantt chart generation will be disabled.")
+    import sys as _sys
+    logger.warning(
+        "plotly import failed: %s (%s). Python: %s. "
+        "Gantt chart generation will be disabled.",
+        e, type(e).__name__, _sys.executable,
+    )
 
 
 # =============================================================================
@@ -74,6 +79,7 @@ def _floor_sort_key(floor_id: str):
 
 WORK_TYPE_COLORS = {
     "rebar_beams":   "#3498db",  # blue
+    "rebar_joists":  "#1abc9c",  # teal
     "rebar_columns": "#e67e22",  # orange
     "rebar_walls":   "#2ecc71",  # green
     "rebar_slabs":   "#9b59b6",  # purple
@@ -82,6 +88,7 @@ WORK_TYPE_COLORS = {
 
 WORK_TYPE_LABELS = {
     "rebar_beams":   "Beams",
+    "rebar_joists":  "Joists",
     "rebar_columns": "Columns",
     "rebar_walls":   "Walls",
     "rebar_slabs":   "Slabs",
@@ -142,7 +149,7 @@ class GanttChartGenerator:
 
         fig = go.Figure()
 
-        work_type_order = ["rebar_beams", "rebar_columns", "rebar_walls", "rebar_slabs", "rebar_unknown"]
+        work_type_order = ["rebar_beams", "rebar_joists", "rebar_columns", "rebar_walls", "rebar_slabs", "rebar_unknown"]
 
         for wt in work_type_order:
             if wt not in seen_types:
@@ -252,6 +259,7 @@ def compute_floor_schedule_tool(
     work_packages_path: str = DEFAULT_WORK_PACKAGES_PATH,
     hours_per_day: float = DEFAULT_HOURS_PER_DAY,
     rebar_beams_crews: int = 2,
+    rebar_joists_crews: int = 2,
     rebar_columns_crews: int = 1,
     rebar_walls_crews: int = 1,
     rebar_slabs_crews: int = 2,
@@ -268,6 +276,7 @@ def compute_floor_schedule_tool(
                            Default: "projects/work_packages.json"
         hours_per_day: Working hours per day. Default: 8.0
         rebar_beams_crews: Number of crews for beam rebar work. Default: 2
+        rebar_joists_crews: Number of crews for joist (nervio) rebar work. Default: 2
         rebar_columns_crews: Number of crews for column rebar work. Default: 1
         rebar_walls_crews: Number of crews for wall rebar work. Default: 1
         rebar_slabs_crews: Number of crews for slab rebar work. Default: 2
@@ -289,6 +298,7 @@ def compute_floor_schedule_tool(
         # Build crews_per_work_type from parameters
         crews_per_work_type = DEFAULT_CREWS_PER_WORK_TYPE.copy()
         crews_per_work_type["rebar_beams"] = max(1, int(rebar_beams_crews or 1))
+        crews_per_work_type["rebar_joists"] = max(1, int(rebar_joists_crews or 1))
         crews_per_work_type["rebar_columns"] = max(1, int(rebar_columns_crews or 1))
         crews_per_work_type["rebar_walls"] = max(1, int(rebar_walls_crews or 1))
         crews_per_work_type["rebar_slabs"] = max(1, int(rebar_slabs_crews or 1))
@@ -377,6 +387,7 @@ def generate_gantt_chart(
     floor_schedule_path: str = DEFAULT_FLOOR_SCHEDULE_PATH,
     hours_per_day: float = DEFAULT_HOURS_PER_DAY,
     rebar_beams_crews: int = 2,
+    rebar_joists_crews: int = 2,
     rebar_columns_crews: int = 1,
     rebar_walls_crews: int = 1,
     rebar_slabs_crews: int = 2,
@@ -388,7 +399,7 @@ def generate_gantt_chart(
 
     The chart shows each floor as a horizontal bar on the Y-axis, with the X-axis
     representing cumulative project days. Bars are color-coded by work type
-    (beams=blue, columns=orange, walls=green, slabs=purple).
+    (beams=blue, joists=teal, columns=orange, walls=green, slabs=purple).
     The HTML file can be opened in any browser with zoom, pan, and hover tooltips.
 
     Args:
@@ -398,6 +409,7 @@ def generate_gantt_chart(
                             Default: "projects/floor_schedule.json"
         hours_per_day: Working hours per day. Default: 8.0
         rebar_beams_crews: Number of crews for beam rebar work. Default: 2
+        rebar_joists_crews: Number of crews for joist (nervio) rebar work. Default: 2
         rebar_columns_crews: Number of crews for column rebar work. Default: 1
         rebar_walls_crews: Number of crews for wall rebar work. Default: 1
         rebar_slabs_crews: Number of crews for slab rebar work. Default: 2
@@ -428,6 +440,7 @@ def generate_gantt_chart(
 
             crews_per_work_type = DEFAULT_CREWS_PER_WORK_TYPE.copy()
             crews_per_work_type["rebar_beams"] = max(1, int(rebar_beams_crews or 1))
+            crews_per_work_type["rebar_joists"] = max(1, int(rebar_joists_crews or 1))
             crews_per_work_type["rebar_columns"] = max(1, int(rebar_columns_crews or 1))
             crews_per_work_type["rebar_walls"] = max(1, int(rebar_walls_crews or 1))
             crews_per_work_type["rebar_slabs"] = max(1, int(rebar_slabs_crews or 1))
@@ -499,7 +512,7 @@ You work with **work packages** and **floor schedules** generated from ProDet re
 
 3. **generate_gantt_chart**
    - Generates an interactive HTML Gantt chart showing the rebar installation timeline across all floors
-   - Bars are color-coded by work type (beams=blue, columns=orange, walls=green, slabs=purple)
+   - Bars are color-coded by work type (beams=blue, joists=teal, columns=orange, walls=green, slabs=purple)
    - Floors are sorted bottom-up (PISO 2 at bottom, CUB. MÁQUINAS at top)
    - The HTML file can be opened in any browser with zoom, pan, and hover tooltips
    - Can use an existing floor_schedule.json or compute a fresh one

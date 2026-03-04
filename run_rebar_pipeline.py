@@ -49,7 +49,8 @@ def main() -> None:
         "--xlsx",
         "-x",
         required=True,
-        help="Path to the input ProDet .xlsx file (reinforcement_solution.xlsx or similar).",
+        nargs="+",
+        help="Path(s) to input ProDet .xlsx file(s). Multiple files are merged.",
     )
     parser.add_argument(
         "--data-dir",
@@ -94,13 +95,14 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Resolve paths
-    xlsx_path = os.path.abspath(args.xlsx)
+    # Resolve paths — args.xlsx is now a list
+    xlsx_paths = [os.path.abspath(p) for p in args.xlsx]
     data_dir = os.path.abspath(args.data_dir)
 
-    if not os.path.exists(xlsx_path):
-        logger.error("Input .xlsx file not found: %s", xlsx_path)
-        sys.exit(1)
+    for p in xlsx_paths:
+        if not os.path.exists(p):
+            logger.error("Input .xlsx file not found: %s", p)
+            sys.exit(1)
 
     os.makedirs(data_dir, exist_ok=True)
 
@@ -110,21 +112,16 @@ def main() -> None:
     work_packages_json = os.path.join(data_dir, "work_packages.json")
     floor_schedule_json = os.path.join(data_dir, "floor_schedule.json")
 
-    logger.info("Input .xlsx: %s", xlsx_path)
+    logger.info("Input .xlsx (%d file(s)): %s", len(xlsx_paths), xlsx_paths)
     logger.info("Output directory: %s", data_dir)
 
-    # 1) XLSX -> elements.json
-    run_step(
-        [
-            sys.executable,
-            args.xlsx_to_elements_script,
-            "--input",
-            xlsx_path,
-            "--output",
-            elements_json,
-        ],
-        "prodet_to_elements",
-    )
+    # 1) XLSX(s) -> elements.json  (direct library call to support merging)
+    from reinforcement_parser import parse_reinforcement_files, write_json_output
+
+    logger.info("Parsing %d xlsx file(s)...", len(xlsx_paths))
+    elements_data = parse_reinforcement_files(xlsx_paths)
+    write_json_output(elements_data, elements_json)
+    logger.info("Wrote %d elements to %s", len(elements_data["elements"]), elements_json)
 
     # 2) elements.json -> elements_with_ci.json
     run_step(

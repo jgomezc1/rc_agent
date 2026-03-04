@@ -66,14 +66,18 @@ class ConfigImpactState(TypedDict, total=False):
     variant_name: str
     variant_config_result: Dict[str, Any]
 
-    # After run_prodet
+    # After run_prodet + run_pipeline
     prodet_results: Dict[str, Dict[str, Any]]
+    pipeline_results: Dict[str, Dict[str, Any]]
 
     # After compare
     comparison: Dict[str, Any]
 
     # After narrate (LLM)
     narrative: str
+
+    # After generate_structubim
+    structubim_output: Optional[str]
 
     # Status tracking
     messages: List[str]
@@ -121,24 +125,27 @@ def load_baseline(state: ConfigImpactState) -> dict:
 
     messages.append(f"Loaded config for project '{project_name}'")
 
-    # Detect which element types have reinforcement output
-    element_types = []
-    baseline_has_output: Dict[str, bool] = {}
-
-    for etype in ("vigas", "nervios"):
-        xlsx = _resolve_reinforcement_file(project_name, etype)
-        has = xlsx is not None
-        baseline_has_output[etype] = has
-        if has:
-            element_types.append(etype)
-
+    # Detect element types from the CONFIG (which sections exist),
+    # not from existing output files. If the config defines vigas and
+    # nervios, both must be run through ProDet.
+    config_element_types = list(config_summary.get("element_types", {}).keys())
+    # Only include types that ProDet can process (vigas, nervios)
+    element_types = [et for et in config_element_types if et in ("vigas", "nervios")]
     if not element_types:
-        # No output yet — still include vigas as the primary type to run
         element_types = ["vigas"]
-        baseline_has_output["vigas"] = False
-        messages.append("No existing reinforcement output found — ProDet will be run for baseline too.")
-    else:
-        messages.append(f"Detected element types with output: {element_types}")
+
+    messages.append(f"Element types from config: {element_types}")
+
+    # Check which types already have reinforcement output (to skip
+    # redundant baseline ProDet runs)
+    baseline_has_output: Dict[str, bool] = {}
+    for etype in element_types:
+        xlsx = _resolve_reinforcement_file(project_name, etype)
+        baseline_has_output[etype] = xlsx is not None
+
+    missing = [et for et, has in baseline_has_output.items() if not has]
+    if missing:
+        messages.append(f"Baseline missing output for: {missing} — ProDet will run for these.")
 
     return {
         "config_summary": config_summary,
@@ -322,12 +329,84 @@ def create_variant(state: ConfigImpactState) -> dict:
 # Node: run_prodet_all
 # =============================================================================
 
+ELEMENT_TYPE_SUFFIX = {"vigas": "_V", "nervios": "_N"}
+
+
+def _copy_prodet_output(project_path: str, prodet_result: Dict[str, Any], element_type: str) -> Optional[str]:
+    """Copy ProDet output xlsx with type-specific name.
+
+    Returns the destination path on success, None on failure.
+    """
+    import shutil
+    output_path = prodet_result.get("output_file")
+    if not output_path or not os.path.isfile(output_path):
+        return None
+    suffix = ELEMENT_TYPE_SUFFIX.get(element_type, "")
+    dest = os.path.join(project_path, f"reinforcement_solution{suffix}.xlsx")
+    if os.path.abspath(output_path) != os.path.abspath(dest):
+        shutil.copy2(output_path, dest)
+    return dest
+
+
+def _run_data_pipeline(project_name: str, xlsx_paths: List[str]) -> Dict[str, Any]:
+    """Run the rebar data pipeline with one or more xlsx files for a project.
+
+    Generates elements.json → elements_with_ci.json → elements_with_prod.json
+    → work_packages.json → floor_schedule.json, which are needed by the
+    procurement and scheduling agents.
+    """
+    import sys
+    import subprocess
+    from paths import RC_AGENT_ROOT, project_dir
+    from prodet_agent import PIPELINE_ARTIFACTS
+
+    data_dir = project_dir(project_name)
+    pipeline_script = os.path.join(RC_AGENT_ROOT, "run_rebar_pipeline.py")
+
+    if not os.path.isfile(pipeline_script):
+        return {"success": False, "error": f"Pipeline script not found: {pipeline_script}"}
+
+    try:
+        cmd = [sys.executable, pipeline_script]
+        cmd.extend(["-x"] + xlsx_paths)
+        cmd.extend(["-d", data_dir])
+
+        result = subprocess.run(
+            cmd,
+            cwd=RC_AGENT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        artifacts = {}
+        for name in PIPELINE_ARTIFACTS:
+            artifacts[name] = os.path.isfile(os.path.join(data_dir, name))
+
+        return {
+            "success": result.returncode == 0 and all(artifacts.values()),
+            "return_code": result.returncode,
+            "artifacts": artifacts,
+            "stderr": result.stderr[-500:] if result.stderr else "",
+        }
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Pipeline timed out after 120s"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def run_prodet_all(state: ConfigImpactState) -> dict:
-    """Run ProDet for baseline (if needed) and variant, for each element type."""
+    """Run ProDet for baseline (if needed) and variant, for each element type.
+
+    Phase 1: Run ProDet for all element types and collect xlsx paths.
+    Phase 2: Run the data pipeline ONCE per project with all xlsx files,
+    producing a single merged elements.json.
+    """
     from prodet_agent import (
         _run_prodet_single, _find_prodet_output,
         PRODET_PROJECTS,
     )
+    from procurement_agent import _resolve_reinforcement_file
+    from structubim_handler import copy_cantidades_after_run
 
     project_name = state["project_name"]
     variant_name = state["variant_name"]
@@ -336,11 +415,16 @@ def run_prodet_all(state: ConfigImpactState) -> dict:
     messages = list(state.get("messages", []))
 
     prodet_results: Dict[str, Dict[str, Any]] = {}
+    pipeline_results: Dict[str, Dict[str, Any]] = {}
+
+    # Phase 1: Run ProDet for all element types, collect xlsx paths
+    baseline_xlsx_paths: List[str] = []
+    variant_xlsx_paths: List[str] = []
 
     for etype in element_types:
         etype_results: Dict[str, Any] = {}
 
-        # Run baseline if no output exists
+        # --- Baseline ---
         if not baseline_has_output.get(etype, False):
             baseline_path = os.path.join(PRODET_PROJECTS, project_name)
             msg = f"Running ProDet for baseline ({project_name}/{etype})..."
@@ -350,11 +434,20 @@ def run_prodet_all(state: ConfigImpactState) -> dict:
             etype_results["baseline_run"] = base_res
             if base_res.get("success"):
                 messages.append(f"  Baseline {etype} completed in {base_res.get('elapsed_seconds', '?')}s")
+                copy_cantidades_after_run(baseline_path, etype)
+                dest = _copy_prodet_output(baseline_path, base_res, etype)
+                if dest:
+                    baseline_xlsx_paths.append(dest)
             else:
                 messages.append(f"  Baseline {etype} FAILED: {base_res.get('error', 'unknown')}")
                 etype_results["baseline_error"] = base_res.get("error", "unknown")
+        else:
+            # Find existing output file
+            existing = _resolve_reinforcement_file(project_name, etype)
+            if existing:
+                baseline_xlsx_paths.append(existing)
 
-        # Always run variant
+        # --- Variant ---
         variant_path = os.path.join(PRODET_PROJECTS, variant_name)
         msg = f"Running ProDet for variant ({variant_name}/{etype})..."
         messages.append(msg)
@@ -363,13 +456,44 @@ def run_prodet_all(state: ConfigImpactState) -> dict:
         etype_results["variant_run"] = var_res
         if var_res.get("success"):
             messages.append(f"  Variant {etype} completed in {var_res.get('elapsed_seconds', '?')}s")
+            copy_cantidades_after_run(variant_path, etype)
+            dest = _copy_prodet_output(variant_path, var_res, etype)
+            if dest:
+                variant_xlsx_paths.append(dest)
         else:
             messages.append(f"  Variant {etype} FAILED: {var_res.get('error', 'unknown')}")
             etype_results["variant_error"] = var_res.get("error", "unknown")
 
         prodet_results[etype] = etype_results
 
-    return {"prodet_results": prodet_results, "messages": messages}
+    # Phase 2: Run pipeline ONCE per project with all xlsx files
+    if baseline_xlsx_paths:
+        msg = f"Running data pipeline for baseline ({project_name}) with {len(baseline_xlsx_paths)} xlsx file(s)..."
+        messages.append(msg)
+        print(f"  {msg}")
+        pipe_res = _run_data_pipeline(project_name, baseline_xlsx_paths)
+        pipeline_results["baseline"] = pipe_res
+        if pipe_res.get("success"):
+            messages.append(f"  Baseline pipeline complete")
+        else:
+            messages.append(f"  Baseline pipeline warning: {pipe_res.get('error', 'partial')}")
+
+    if variant_xlsx_paths:
+        msg = f"Running data pipeline for variant ({variant_name}) with {len(variant_xlsx_paths)} xlsx file(s)..."
+        messages.append(msg)
+        print(f"  {msg}")
+        pipe_res = _run_data_pipeline(variant_name, variant_xlsx_paths)
+        pipeline_results["variant"] = pipe_res
+        if pipe_res.get("success"):
+            messages.append(f"  Variant pipeline complete")
+        else:
+            messages.append(f"  Variant pipeline warning: {pipe_res.get('error', 'partial')}")
+
+    return {
+        "prodet_results": prodet_results,
+        "pipeline_results": pipeline_results,
+        "messages": messages,
+    }
 
 
 # =============================================================================
@@ -494,6 +618,44 @@ def _merge_comparisons(comparisons: Dict[str, Dict[str, Any]]) -> Dict[str, Any]
 
 
 # =============================================================================
+# Node: generate_structubim
+# =============================================================================
+
+def generate_structubim(state: ConfigImpactState) -> dict:
+    """Generate processedAnalysis.json with baseline + variant for StructuBim."""
+    from structubim_handler import find_cantidades, generate_structubim_json
+    from prodet_agent import PRODET_PROJECTS
+
+    project_name = state["project_name"]
+    variant_name = state["variant_name"]
+    element_types = state["element_types"]
+    messages = list(state.get("messages", []))
+
+    baseline_path = os.path.join(PRODET_PROJECTS, project_name)
+    variant_path = os.path.join(PRODET_PROJECTS, variant_name)
+
+    project_paths = {}
+    for name, path in [(project_name, baseline_path), (variant_name, variant_path)]:
+        data = find_cantidades(path, element_types)
+        if data:
+            project_paths[name] = path
+
+    if not project_paths:
+        messages.append("No cantidades.json found — skipping StructuBim generation")
+        return {"structubim_output": None, "messages": messages}
+
+    output_path = os.path.join(variant_path, "processedAnalysis.json")
+    result = generate_structubim_json(project_paths, output_path, element_types)
+
+    if result.get("success"):
+        messages.append(f"StructuBim JSON generated: {output_path}")
+        return {"structubim_output": output_path, "messages": messages}
+    else:
+        messages.append(f"StructuBim generation warning: {result.get('error', 'unknown')}")
+        return {"structubim_output": None, "messages": messages}
+
+
+# =============================================================================
 # Node: narrate_tradeoff (LLM)
 # =============================================================================
 
@@ -592,6 +754,7 @@ def build_config_impact_workflow():
     graph.add_node("create_variant", create_variant)
     graph.add_node("run_prodet_all", run_prodet_all)
     graph.add_node("compare_all", compare_all)
+    graph.add_node("generate_structubim", generate_structubim)
     graph.add_node("narrate_tradeoff", narrate_tradeoff)
 
     graph.add_edge(START, "load_baseline")
@@ -603,7 +766,8 @@ def build_config_impact_workflow():
     )
     graph.add_edge("create_variant", "run_prodet_all")
     graph.add_edge("run_prodet_all", "compare_all")
-    graph.add_edge("compare_all", "narrate_tradeoff")
+    graph.add_edge("compare_all", "generate_structubim")
+    graph.add_edge("generate_structubim", "narrate_tradeoff")
     graph.add_edge("narrate_tradeoff", END)
 
     checkpointer = MemorySaver()

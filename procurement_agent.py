@@ -1618,6 +1618,28 @@ def generate_procurement_report(
 # Reinforcement Comparison Tool
 # =============================================================================
 
+def _sanitize_for_json(obj):
+    """Recursively convert numpy/pandas types to native Python types.
+
+    LangGraph's MemorySaver checkpoint uses msgpack, which cannot serialize
+    numpy.float64, numpy.int64, etc. This ensures all values are plain
+    Python int/float/str/bool/list/dict.
+    """
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    return obj
+
+
 def _resolve_reinforcement_file(project_name: str, element_type: str) -> Optional[str]:
     """Find the reinforcement Excel file for a project + element type.
 
@@ -1947,14 +1969,14 @@ def compare_reinforcement(
             stats.pop("floors", None)
             stats.pop("diameter_weights_tonf", None)
 
-        return {
+        return _sanitize_for_json({
             "element_type": element_type,
             "baseline": base_stats,
             "variant": var_stats,
             "delta": delta,
             "diameter_comparison": diameter_comparison,
             "floor_comparison": floor_comparison,
-        }
+        })
 
     except Exception as e:
         logger.error(f"Reinforcement comparison failed: {e}")

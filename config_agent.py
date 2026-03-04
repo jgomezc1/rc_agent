@@ -437,6 +437,49 @@ def update_config(
         if errors and not applied:
             return {"error": "No changes applied — all paths invalid", "invalid_paths": errors}
 
+        # Post-apply: ensure dependent parameters are consistent.
+        for etype in ("vigas", "nervios", "columnas"):
+            esection = config.get(etype, {})
+
+            # Guard 1: lim_max_barras_capa=true requires max_barras_capa dict.
+            pd = esection.get("param_despiece", {})
+            if pd.get("lim_max_barras_capa") and "max_barras_capa" not in pd:
+                sections = pd.get("forzar_ref_ppal", {}).get("por_seccion", {})
+                widths = set()
+                for key in sections:
+                    widths.add(key.split(",")[0])
+                if widths:
+                    mbc = {w: 1 if float(w) <= 0.2 else 2 for w in sorted(widths)}
+                    config[etype]["param_despiece"]["max_barras_capa"] = mbc
+                    applied.append({
+                        "path": f"{etype}.param_despiece.max_barras_capa",
+                        "old": None,
+                        "new": mbc,
+                        "note": "auto-generated (required when lim_max_barras_capa=true)",
+                    })
+
+            # Guard 2: filtro_por_nivel=1 with empty por_nivel → reset to 0.
+            # Applies to materiales.fc and estribos.est_min (any section with
+            # this pattern). ProDet crashes with KeyError if por_nivel is empty
+            # but the filter flag tells it to use per-level values.
+            for subpath, subsection in [
+                ("materiales.fc", esection.get("materiales", {}).get("fc", {})),
+                ("estribos.est_min", esection.get("estribos", {}).get("est_min", {})),
+            ]:
+                if not isinstance(subsection, dict):
+                    continue
+                filtro = subsection.get("filtro_por_nivel")
+                por_nivel = subsection.get("por_nivel", {})
+                if filtro and (not por_nivel or not isinstance(por_nivel, dict)
+                               or len(por_nivel) == 0):
+                    subsection["filtro_por_nivel"] = 0
+                    applied.append({
+                        "path": f"{etype}.{subpath}.filtro_por_nivel",
+                        "old": filtro,
+                        "new": 0,
+                        "note": "auto-reset (por_nivel is empty, filtro_por_nivel=1 would crash ProDet)",
+                    })
+
         # Determine output path
         if output_path:
             resolved_output = _resolve_config_path(output_path)

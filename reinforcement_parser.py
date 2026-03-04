@@ -30,11 +30,9 @@ def infer_element_type(element_name: str) -> str:
     """
     Infer the element type from its name.
 
-    For this first iteration:
-    - If the element name starts with "V" or "V-", return "beam".
-    - Otherwise, return "unknown".
-
-    This logic will be refined later.
+    - V-prefix → "beam" (vigas)
+    - N-prefix → "joist" (nervios)
+    - Otherwise → "unknown"
     """
     if element_name is None:
         return "unknown"
@@ -43,6 +41,9 @@ def infer_element_type(element_name: str) -> str:
 
     if name.startswith("V-") or name == "V" or (name.startswith("V") and len(name) > 1 and not name[1].isalpha()):
         return "beam"
+
+    if name.startswith("N-") or name == "N" or (name.startswith("N") and len(name) > 1 and not name[1].isalpha()):
+        return "joist"
 
     return "unknown"
 
@@ -366,6 +367,29 @@ def parse_reinforcement_file(input_path: str) -> Dict[str, Any]:
     }
 
     return output
+
+
+def parse_reinforcement_files(input_paths: List[str]) -> Dict[str, Any]:
+    """Parse multiple ProDet xlsx files and merge into a single elements structure.
+
+    Used when a project has both vigas and nervios (separate xlsx each).
+    Elements from all files are combined; project_id comes from the first file.
+    """
+    if not input_paths:
+        raise ValueError("No input paths provided")
+    if len(input_paths) == 1:
+        return parse_reinforcement_file(input_paths[0])
+
+    all_elements = []
+    project_id = None
+
+    for path in input_paths:
+        data = parse_reinforcement_file(path)
+        if project_id is None:
+            project_id = data["project_id"]
+        all_elements.extend(data["elements"])
+
+    return {"project_id": project_id, "elements": all_elements}
 
 
 def write_json_output(data: Dict[str, Any], output_path: str) -> None:

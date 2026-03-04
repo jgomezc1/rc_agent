@@ -445,18 +445,30 @@ def run_prodet(
 
         # Handle "ambos" — run vigas then nervios sequentially
         if element_type == "ambos":
+            from structubim_handler import copy_cantidades_after_run, generate_structubim_json
             results = {}
             all_success = True
             for etype in ("vigas", "nervios"):
                 res = _run_prodet_single(project_path, etype, timeout_seconds)
                 results[etype] = res
-                if not res.get("success"):
+                if res.get("success"):
+                    copy_cantidades_after_run(project_path, etype)
+                else:
                     all_success = False
-            return {
+            ret = {
                 "element_type": "ambos",
                 "all_success": all_success,
                 "runs": results,
             }
+            # Auto-generate processedAnalysis.json for successful element types
+            etypes_ok = [et for et, r in results.items() if r.get("success")]
+            if etypes_ok:
+                try:
+                    ret["structubim"] = _auto_generate_structubim(project_name, etypes_ok)
+                except Exception as sb_err:
+                    logger.warning(f"StructuBim auto-generation failed: {sb_err}")
+                    ret["structubim"] = {"success": False, "error": str(sb_err)}
+            return ret
 
         if element_type not in VALID_ELEMENT_TYPES:
             return {
@@ -464,7 +476,16 @@ def run_prodet(
                          f"Valid options: {', '.join(VALID_ELEMENT_TYPES)}, ambos."
             }
 
-        return _run_prodet_single(project_path, element_type, timeout_seconds)
+        result = _run_prodet_single(project_path, element_type, timeout_seconds)
+        if result.get("success"):
+            from structubim_handler import copy_cantidades_after_run
+            copy_cantidades_after_run(project_path, element_type)
+            try:
+                result["structubim"] = _auto_generate_structubim(project_name, [element_type])
+            except Exception as sb_err:
+                logger.warning(f"StructuBim auto-generation failed: {sb_err}")
+                result["structubim"] = {"success": False, "error": str(sb_err)}
+        return result
 
     except Exception as e:
         logger.error(f"Error running ProDet: {e}")
@@ -624,11 +645,132 @@ def run_data_pipeline(
         return {"error": str(e)}
 
 
+@tool
+def generate_structubim_json_tool(
+    project_names: str,
+    output_dir: str = "",
+    element_types: str = "vigas,nervios",
+) -> Dict[str, Any]:
+    """Generate processedAnalysis.json for StructuBim 3D visualizer.
+
+    Finds cantidades.json files for the given projects, processes reinforcement
+    data (volumes, weights, complexity scores), and produces processedAnalysis.json.
+    Handles vigas+nervios merge automatically when type-specific files exist.
+
+    Args:
+        project_names: Comma-separated project names (e.g., "mokara,mokara_speed").
+                       Each must be a subfolder under projects/.
+        output_dir: Output directory (default: first project's folder).
+        element_types: Element types to look for (default: "vigas,nervios").
+                       Comma-separated.
+
+    Returns:
+        Dictionary with success flag, output file path, and per-variant summary
+        (element count, bar types, concrete volume, story list).
+    """
+    from structubim_handler import generate_structubim_json
+
+    try:
+        names = [n.strip() for n in project_names.split(",") if n.strip()]
+        if not names:
+            return {"error": "No project names provided."}
+
+        etypes = [t.strip() for t in element_types.split(",") if t.strip()]
+
+        project_paths = {}
+        for name in names:
+            pdir = project_dir(name)
+            if not os.path.isdir(pdir):
+                return {"error": f"Project folder not found: {pdir}"}
+            project_paths[name] = pdir
+
+        out_dir = output_dir.strip() if output_dir.strip() else project_dir(names[0])
+        out_path = os.path.join(out_dir, "processedAnalysis.json")
+
+        return generate_structubim_json(project_paths, out_path, etypes)
+
+    except Exception as e:
+        logger.error(f"Error generating StructuBim JSON: {e}")
+        return {"error": str(e)}
+
+
 # =============================================================================
 # Parametric Study Helpers
 # =============================================================================
 
 _COMPANION_FILES = ["project.prodes", "project.geom", "project.cargas"]
+
+
+def _find_source_project(project_name: str) -> Optional[str]:
+    """Detect the source project for a variant (e.g. 'supernovaA' for 'supernovaA_eco1').
+
+    Tries progressively stripping '_suffix' segments from the right and checks
+    whether the candidate is an existing project with a project.config file.
+    Returns None if the project is itself a source (no parent found).
+    """
+    parts = project_name.split("_")
+    for i in range(len(parts) - 1, 0, -1):
+        candidate = "_".join(parts[:i])
+        cdir = project_dir(candidate)
+        if (
+            candidate != project_name
+            and os.path.isdir(cdir)
+            and os.path.isfile(os.path.join(cdir, "project.config"))
+        ):
+            return candidate
+    return None
+
+
+def _collect_variant_family(
+    source_name: str, element_types: List[str]
+) -> Dict[str, str]:
+    """Collect source + all variant project paths that have cantidades data.
+
+    Scans for folders named ``{source_name}_*`` next to the source project.
+    Returns ``{project_name: project_folder_path}`` for every project that
+    has at least one cantidades file for the given element types.
+    """
+    from structubim_handler import find_cantidades
+
+    family: Dict[str, str] = {}
+    source_dir_path = project_dir(source_name)
+    if find_cantidades(source_dir_path, element_types):
+        family[source_name] = source_dir_path
+
+    projects_root = os.path.dirname(source_dir_path)
+    prefix = source_name + "_"
+    try:
+        entries = os.listdir(projects_root)
+    except OSError:
+        entries = []
+    for entry in sorted(entries):
+        if entry.startswith(prefix) and os.path.isdir(os.path.join(projects_root, entry)):
+            vdir = project_dir(entry)
+            if find_cantidades(vdir, element_types):
+                family[entry] = vdir
+    return family
+
+
+def _auto_generate_structubim(
+    project_name: str, element_types: List[str]
+) -> Dict[str, Any]:
+    """Generate a combined processedAnalysis.json for a project and all its variants.
+
+    Always writes to the **source** project folder so there is a single file
+    per project family, not one per variant.
+    """
+    from structubim_handler import generate_structubim_json
+
+    source_name = _find_source_project(project_name) or project_name
+    family = _collect_variant_family(source_name, element_types)
+    if not family:
+        return {"success": False, "error": "No cantidades data found for any variant"}
+    source_dir_path = project_dir(source_name)
+    return generate_structubim_json(
+        family,
+        os.path.join(source_dir_path, "processedAnalysis.json"),
+        element_types,
+    )
 
 
 def _create_variant_config(
@@ -798,6 +940,10 @@ def run_parametric_study(
                     results.append(variant_result)
                     continue
 
+                # Copy cantidades.json to type-specific file
+                from structubim_handler import copy_cantidades_after_run
+                copy_cantidades_after_run(variant_dir, element_type)
+
                 # Step 3: Copy output (rename to reinforcement_solution.xlsx)
                 output_path = prodet_res.get("output_file")
                 if output_path and os.path.isfile(output_path):
@@ -865,7 +1011,8 @@ def run_parametric_study(
 
             results.append(variant_result)
 
-        return {
+        # Auto-generate combined processedAnalysis.json for source + all successful variants
+        ret = {
             "source_project": source_project,
             "element_type": element_type,
             "total_variants": total,
@@ -873,6 +1020,15 @@ def run_parametric_study(
             "failed": failed,
             "variants": results,
         }
+
+        if run_prodet_flag:
+            try:
+                ret["structubim"] = _auto_generate_structubim(source_project, [element_type])
+            except Exception as sb_err:
+                logger.warning(f"StructuBim auto-generation failed: {sb_err}")
+                ret["structubim"] = {"success": False, "error": str(sb_err)}
+
+        return ret
 
     except Exception as e:
         logger.error(f"Error in parametric study: {e}")
@@ -940,6 +1096,12 @@ You help users run ProDet (a reinforced concrete design tool) on project files a
    and run ProDet + pipeline for each. ONE tool call handles the entire loop.
    Pass variants_json as a JSON list of {suffix, changes} objects.
 
+9. **generate_structubim_json_tool** — Generate processedAnalysis.json for
+   StructuBim 3D visualizer. Pass comma-separated project names and element
+   types. Processes cantidades.json files (volumes, weights, bar types,
+   complexity scores) and writes the output file. Upload the result to
+   structu-bim.com for 3D reinforcement visualization.
+
 == PARAMETRIC STUDY WORKFLOW ==
 
 When a user asks to compare multiple configurations (e.g. different cutting
@@ -1005,7 +1167,17 @@ edit project.config directly.
 
 - If a user just asks "what projects are available", use list_projects only.
 
-- If ProDet fails, show the stderr output and suggest checking the project files.
+- If ProDet fails, show the stderr output and diagnose the cause correctly:
+  - **For variant/parametric projects** (names like mokara_eco1, supernovaA_lh50cm):
+    The companion files (project.geom, project.cargas, project.prodes) are IMMUTABLE
+    COPIES of the source project's seed files — they are never modified. Therefore
+    geometry/loads/design data is always valid. Failures in variant runs are ALWAYS
+    caused by the config changes being incompatible with the project's geometry.
+    Diagnose which specific config parameter change caused the issue (e.g., a
+    calibre range that doesn't include a beam's required diameter, or a parameter
+    combination that ProDet cannot resolve for the given geometry).
+    NEVER suggest "verify the project.geom file" for variant projects.
+  - **For source/original projects**: Check project readiness (files present, valid).
 
 - If the pipeline fails, report which artifacts were generated and which failed.
 
@@ -1033,6 +1205,7 @@ PIPELINE
 
 NEXT STEPS
 - What the user can do next (e.g., "Use the Procurement Agent to review the data")
+- If cantidades.json exists, suggest generating StructuBim JSON for 3D visualization
 
 == PROJECT-SPECIFIC DATA ==
 
@@ -1075,6 +1248,7 @@ For example, running ProDet for project "mokara" stores files in projects/mokara
             load_config_summary,
             update_config,
             run_parametric_study,
+            generate_structubim_json_tool,
         ]
 
         self.agent = create_react_agent(
