@@ -68,3 +68,4 @@ logistics_outputs/
 # Project-specific files (configs, binaries, pipeline artifacts)
 projects/
 data/
+examples/

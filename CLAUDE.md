@@ -59,7 +59,7 @@ reinforcement_solution.xlsx
 
 | Agent | Module | Purpose | Key Tools |
 |-------|--------|---------|-----------|
-| Grouping Optimizer | `grouping_optimizer.py` | Minimize steel via optimal floor groupings | `inspect_data_file`, `grouping_optimizer_v1` |
+| Grouping Optimizer | `grouping_optimizer.py` | Estimate floor groupings, user selects, create config, run ProDet, compare results | `load_baseline_steel`, `estimate_groupings`, `apply_grouping`, `compare_grouping_results` |
 | Procurement | `procurement_agent.py` | Review reinforcement files, generate bar lists & PDF reports | `load_reinforcement_file`, `list_available_floors`, `get_floor_data`, `analyze_bars_by_diameter`, `analyze_bars_by_shape`, `generate_pdf_report` |
 | Scheduling | `scheduling_agent.py` | Plan rebar installation schedules | `compute_floor_schedule_tool`, `analyze_bottleneck`, `compare_scenarios` |
 | ProDet Runner | `prodet_agent.py` | Run ProDet, copy output, run data pipeline | `list_projects`, `inspect_project`, `run_prodet`, `copy_output_to_rc_agent`, `run_data_pipeline` |
@@ -122,6 +122,49 @@ Produces a trade-off narrative with specific numbers, e.g.: "Switching from Bala
 Key tool: `compare_reinforcement` in `procurement_agent.py` — diffs `Resumen_Refuerzo`, `RefLong_Total`, and `RefTrans_Total` between two project folders.
 
 Reuses internal helpers from `prodet_agent.py` (`_create_variant_config`, `_run_prodet_single`) and `config_agent.py` (`load_config_summary`).
+
+### Solution Composition
+
+Vigas and nervios are independently parameterized in ProDet, so users run
+separate parametric studies for each element type and then combine the best
+variant per type into a "building solution."
+
+**Tool:** `compose_solution` in `prodet_agent.py`
+
+**Solution folders:** Named `{source}_sol_{name}` (e.g., `mokara_sol_balanced`).
+Contain xlsx files from selected variants, pipeline artifacts, and `solution.json`
+recording provenance. Solution folders are indistinguishable from normal project
+folders for downstream agents — procurement and scheduling tools work on them
+without modification.
+
+**`solution.json` fields:** `source_project`, `solution_name`,
+`element_type_sources` (dict mapping element type → variant project name),
+`created_at`, `pipeline_ran`, `artifacts`, `xlsx_files`, `cantidades_files`,
+`structubim_files`.
+
+### Grouping Optimizer — End-to-End Workflow
+
+The Grouping Optimizer agent loads an existing ProDet solution, estimates the
+impact of various floor groupings, asks the user to select one, then creates
+a new config variant with floor groups, runs ProDet, and reports actual results
+compared to the ungrouped baseline.
+
+**Flow:**
+1. `load_baseline_steel` — loads floor-level steel from existing reinforcement xlsx
+2. Agent asks user to confirm which floors are geometrically identical
+3. `estimate_groupings` — runs combinatorial optimizer, reports estimated deltas
+4. User selects a specific grouping
+5. `apply_grouping` — creates config variant with grupos_niveles, runs ProDet,
+   runs pipeline, compares actual results
+6. Agent reports actual steel delta, bar type reduction, and next steps
+
+**Estimation model:** envelope_steel = max(steel_per_level) in group × group_size.
+Approximation of ProDet's "envolvente" mode. Actual results typically differ by
+1-3% from estimates.
+
+**Key reuse:** `set_floor_groups` (config_agent) for validated config creation,
+`_run_prodet_single` (prodet_agent) for ProDet execution,
+`compare_reinforcement` (procurement_agent) for actual comparison.
 
 ### ProDet Excel Schema
 

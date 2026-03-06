@@ -753,31 +753,12 @@ def review_reinforcement_file(
     """
     Review a reinforcement solution file for completeness and clarity.
 
-    This tool inspects an Excel/CSV file containing reinforcement data and checks:
-    - Column structure and naming (across ALL sheets for Excel files)
-    - Data completeness (missing values)
-    - Data validity (correct types, valid ranges)
-    - Potential duplicates or issues
-
-    For Excel files with multiple sheets, the tool reviews EACH sheet individually
-    and provides a combined summary with sheet-by-sheet breakdown.
-
     Args:
-        file_path: Path to the reinforcement solution file (.xlsx or .csv)
+        file_path: Path to the reinforcement solution file (.xlsx or .csv).
                   Default: "projects/reinforcement_solution.xlsx"
 
     Returns:
-        Dictionary containing:
-        - file_path: Path to the reviewed file
-        - sheets_count: Number of sheets in the file
-        - sheets: List of per-sheet review results (for multi-sheet files)
-        - total_rows: Total number of data rows across all sheets
-        - columns_detected: List of columns with mapping info
-        - columns_missing: Required/recommended columns not found
-        - validation_issues: List of errors, warnings, and info messages (prefixed with sheet name)
-        - data_summary: Summary statistics per sheet (levels, diameters, weights)
-        - is_valid: Whether the file passes validation
-        - recommendations: Suggestions for improvements
+        Dictionary with per-sheet validation results, data summary, and recommendations.
     """
     try:
         reviewer = ReinforcementFileReviewer()
@@ -1559,36 +1540,16 @@ def generate_procurement_report(
     """
     Generate a detailed procurement report for specific floor(s).
 
-    This tool creates a comprehensive procurement report including:
-    - Total steel quantities (longitudinal and transverse)
-    - Breakdown by bar diameter (Calibre)
-    - Breakdown by bar shape (Figura)
-    - List of elements included
-    - Optional PDF file generation
-
     Args:
-        start_floor: Starting floor name (e.g., "PISO 5", "PISO 10")
-                    For a single floor report, only provide this parameter.
+        start_floor: Starting floor name (e.g., "PISO 5", "PISO 10").
+                    For a single floor, only provide this parameter.
         end_floor: Ending floor name for a range report (e.g., "PISO 11").
-                  If provided, report includes all floors from start_floor to end_floor.
         file_path: Path to the reinforcement solution file.
                   Default: "projects/reinforcement_solution.xlsx"
-        generate_pdf: If True, generates a PDF report file in the 'reports' folder.
-                     Default: False
+        generate_pdf: If True, generates a PDF report in the 'reports' folder.
 
     Returns:
-        Dictionary containing:
-        - floors_included: List of floors in the report
-        - summary: Total weights and bar counts
-        - longitudinal_reinforcement: Detailed breakdown of longitudinal bars
-        - transverse_reinforcement: Detailed breakdown of stirrups
-        - elements_summary: Count of unique structural elements
-        - pdf_path: (only if generate_pdf=True) Path to the generated PDF file
-
-    Examples:
-        - Single floor: start_floor="PISO 5"
-        - Floor range: start_floor="PISO 5", end_floor="PISO 11"
-        - With PDF: start_floor="PISO 5", end_floor="PISO 11", generate_pdf=True
+        Dictionary with steel quantities, diameter/shape breakdowns, and optional pdf_path.
     """
     try:
         generator = ProcurementReportGenerator(file_path)

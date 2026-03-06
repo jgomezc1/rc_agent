@@ -72,6 +72,13 @@ PRODET_OUTPUT_FILENAMES = {
     "columnas": "Cantidades_Refuerzo_C.xlsx",
 }
 
+# Standard xlsx names used in solution folders (matches procurement_agent candidate 2)
+SOLUTION_XLSX_NAMES = {
+    "vigas": "reinforcement_solution_V.xlsx",
+    "nervios": "reinforcement_solution_N.xlsx",
+    "columnas": "reinforcement_solution_C.xlsx",
+}
+
 # Fallback patterns: try both upper and lowercase first letter
 def _find_prodet_output(project_path: str, element_type: str) -> Optional[str]:
     """Find the ProDet output xlsx for a given element type, case-insensitive."""
@@ -221,7 +228,17 @@ def inspect_project(project_name: str) -> Dict[str, Any]:
             except Exception:
                 config_summary = {"note": "Could not parse config.json"}
 
-        return {
+        # Check for solution metadata
+        solution_metadata = None
+        solution_path = os.path.join(project_path, "solution.json")
+        if os.path.isfile(solution_path):
+            try:
+                with open(solution_path, "r", encoding="utf-8") as f:
+                    solution_metadata = json.load(f)
+            except Exception:
+                solution_metadata = {"note": "Could not parse solution.json"}
+
+        info = {
             "project_name": project_name,
             "project_path": project_path,
             "input_files": input_files,
@@ -231,6 +248,12 @@ def inspect_project(project_name: str) -> Dict[str, Any]:
             "ready_to_run": has_prodes,
             "config_summary": config_summary,
         }
+
+        if solution_metadata is not None:
+            info["is_solution"] = True
+            info["solution_metadata"] = solution_metadata
+
+        return info
 
     except Exception as e:
         logger.error(f"Error inspecting project: {e}")
@@ -460,14 +483,17 @@ def run_prodet(
                 "all_success": all_success,
                 "runs": results,
             }
-            # Auto-generate processedAnalysis.json for successful element types
+            # Auto-generate per-element-type StructuBim JSON files
             etypes_ok = [et for et, r in results.items() if r.get("success")]
             if etypes_ok:
-                try:
-                    ret["structubim"] = _auto_generate_structubim(project_name, etypes_ok)
-                except Exception as sb_err:
-                    logger.warning(f"StructuBim auto-generation failed: {sb_err}")
-                    ret["structubim"] = {"success": False, "error": str(sb_err)}
+                structubim_results = {}
+                for et in etypes_ok:
+                    try:
+                        structubim_results[et] = _auto_generate_structubim(project_name, et)
+                    except Exception as sb_err:
+                        logger.warning(f"StructuBim auto-generation failed for {et}: {sb_err}")
+                        structubim_results[et] = {"success": False, "error": str(sb_err)}
+                ret["structubim"] = structubim_results
             return ret
 
         if element_type not in VALID_ELEMENT_TYPES:
@@ -481,7 +507,7 @@ def run_prodet(
             from structubim_handler import copy_cantidades_after_run
             copy_cantidades_after_run(project_path, element_type)
             try:
-                result["structubim"] = _auto_generate_structubim(project_name, [element_type])
+                result["structubim"] = _auto_generate_structubim(project_name, element_type)
             except Exception as sb_err:
                 logger.warning(f"StructuBim auto-generation failed: {sb_err}")
                 result["structubim"] = {"success": False, "error": str(sb_err)}
@@ -651,22 +677,23 @@ def generate_structubim_json_tool(
     output_dir: str = "",
     element_types: str = "vigas,nervios",
 ) -> Dict[str, Any]:
-    """Generate processedAnalysis.json for StructuBim 3D visualizer.
+    """Generate StructuBim JSON files for 3D visualization.
 
-    Finds cantidades.json files for the given projects, processes reinforcement
-    data (volumes, weights, complexity scores), and produces processedAnalysis.json.
-    Handles vigas+nervios merge automatically when type-specific files exist.
+    Produces one file per element type (e.g. vigas.json, nervios.json) so they
+    can be uploaded independently to structu-bim.com. Finds cantidades.json
+    files for the given projects and processes reinforcement data (volumes,
+    weights, complexity scores).
 
     Args:
         project_names: Comma-separated project names (e.g., "mokara,mokara_speed").
                        Each must be a subfolder under projects/.
         output_dir: Output directory (default: first project's folder).
-        element_types: Element types to look for (default: "vigas,nervios").
-                       Comma-separated.
+        element_types: Element types to process (default: "vigas,nervios").
+                       Comma-separated. One output file per type.
 
     Returns:
-        Dictionary with success flag, output file path, and per-variant summary
-        (element count, bar types, concrete volume, story list).
+        Dictionary with per-element-type results, each containing success flag,
+        output file path, and per-variant summary.
     """
     from structubim_handler import generate_structubim_json
 
@@ -685,9 +712,13 @@ def generate_structubim_json_tool(
             project_paths[name] = pdir
 
         out_dir = output_dir.strip() if output_dir.strip() else project_dir(names[0])
-        out_path = os.path.join(out_dir, "processedAnalysis.json")
 
-        return generate_structubim_json(project_paths, out_path, etypes)
+        results = {}
+        for etype in etypes:
+            out_path = os.path.join(out_dir, f"{etype}.json")
+            results[etype] = generate_structubim_json(project_paths, out_path, [etype])
+
+        return {"results": results}
 
     except Exception as e:
         logger.error(f"Error generating StructuBim JSON: {e}")
@@ -752,24 +783,50 @@ def _collect_variant_family(
 
 
 def _auto_generate_structubim(
-    project_name: str, element_types: List[str]
+    project_name: str, element_type: str
 ) -> Dict[str, Any]:
-    """Generate a combined processedAnalysis.json for a project and all its variants.
+    """Generate a StructuBim JSON file for one element type across a project family.
 
-    Always writes to the **source** project folder so there is a single file
-    per project family, not one per variant.
+    Writes to ``<element_type>.json`` (e.g. ``vigas.json``) in the **source**
+    project folder so there is a single file per element type per project family.
+
+    Only includes variants that have the type-specific cantidades file
+    (cantidades_V.json, cantidades_N.json) — ignores the plain cantidades.json
+    fallback to avoid mixing element types.
     """
-    from structubim_handler import generate_structubim_json
+    from structubim_handler import generate_structubim_json, CANTIDADES_TYPE_SUFFIX
 
     source_name = _find_source_project(project_name) or project_name
-    family = _collect_variant_family(source_name, element_types)
-    if not family:
-        return {"success": False, "error": "No cantidades data found for any variant"}
     source_dir_path = project_dir(source_name)
+
+    suffix = CANTIDADES_TYPE_SUFFIX.get(element_type, "")
+    typed_file = f"cantidades{suffix}.json"
+
+    family: Dict[str, str] = {}
+    if os.path.isfile(os.path.join(source_dir_path, typed_file)):
+        family[source_name] = source_dir_path
+
+    projects_root = os.path.dirname(source_dir_path)
+    source_prefix = source_name + "_"
+    try:
+        entries = os.listdir(projects_root)
+    except OSError:
+        entries = []
+    for entry in sorted(entries):
+        if not entry.startswith(source_prefix):
+            continue
+        if "_sol_" in entry:
+            continue
+        vdir = os.path.join(projects_root, entry)
+        if os.path.isdir(vdir) and os.path.isfile(os.path.join(vdir, typed_file)):
+            family[entry] = vdir
+
+    if not family:
+        return {"success": False, "error": f"No cantidades data found for {element_type}"}
     return generate_structubim_json(
         family,
-        os.path.join(source_dir_path, "processedAnalysis.json"),
-        element_types,
+        os.path.join(source_dir_path, f"{element_type}.json"),
+        [element_type],
     )
 
 
@@ -856,29 +913,9 @@ def run_parametric_study(
     """
     Run a parametric study: create config variants and execute ProDet for each.
 
-    Takes a source project, creates multiple variant projects with modified
-    configs, and optionally runs ProDet + the data pipeline for each variant.
-    This is a batch operation — one tool call handles the entire loop.
-
-    Use this when the user wants to compare multiple config variations, e.g.
-    different cutting lengths, calibre ranges, or detailing parameters.
-
-    The variants_json parameter is a JSON list of objects, each with:
+    variants_json is a JSON list of objects, each with:
       - "suffix": short label appended to source project name (e.g. "lh10cm")
       - "changes": dict of dot-path keys to new values
-
-    Example variants_json:
-      [
-        {"suffix": "lh10cm",  "changes": {"vigas.param_despiece.long_homog": 0}},
-        {"suffix": "lh50cm",  "changes": {"vigas.param_despiece.long_homog": 1}},
-        {"suffix": "lh100cm", "changes": {"vigas.param_despiece.long_homog": 2}}
-      ]
-
-    This creates projects/mokara_lh10cm/, projects/mokara_lh50cm/, etc.
-    Each variant folder gets a modified project.config plus companion files.
-
-    Error handling: continue-on-failure. If variant N fails, the error is
-    logged and the study continues with variant N+1.
 
     Args:
         source_project: Name of the source project (e.g. "mokara").
@@ -1011,7 +1048,7 @@ def run_parametric_study(
 
             results.append(variant_result)
 
-        # Auto-generate combined processedAnalysis.json for source + all successful variants
+        # Auto-generate StructuBim JSON for source + all successful variants
         ret = {
             "source_project": source_project,
             "element_type": element_type,
@@ -1023,7 +1060,7 @@ def run_parametric_study(
 
         if run_prodet_flag:
             try:
-                ret["structubim"] = _auto_generate_structubim(source_project, [element_type])
+                ret["structubim"] = _auto_generate_structubim(source_project, element_type)
             except Exception as sb_err:
                 logger.warning(f"StructuBim auto-generation failed: {sb_err}")
                 ret["structubim"] = {"success": False, "error": str(sb_err)}
@@ -1032,6 +1069,290 @@ def run_parametric_study(
 
     except Exception as e:
         logger.error(f"Error in parametric study: {e}")
+        return {"error": str(e)}
+
+
+# =============================================================================
+# Solution Composition
+# =============================================================================
+
+@tool
+def compose_solution(
+    source_project: str,
+    element_type_sources_json: str,
+    solution_name: str,
+    run_pipeline: bool = True,
+) -> Dict[str, Any]:
+    """Create a building solution by combining reinforcement from different
+    element-type variants into a single project folder.
+
+    After running parametric studies on vigas and nervios separately, use this
+    to pick the best variant for each element type. The resulting solution
+    folder contains merged pipeline artifacts so Procurement and Scheduling
+    agents work with it directly as a normal project.
+
+    Args:
+        source_project: Base project name (e.g. "mokara").
+        element_type_sources_json: JSON dict mapping element type to variant
+            project name, e.g. '{"vigas": "mokara_lh50cm", "nervios": "mokara_n_lh10cm"}'.
+        solution_name: Suffix for the solution folder (e.g. "balanced"
+            creates mokara_sol_balanced).
+        run_pipeline: Whether to auto-run the data pipeline (default True).
+
+    Returns:
+        Dict with success flag, solution folder path, metadata, and pipeline results.
+    """
+    from procurement_agent import _resolve_reinforcement_file
+    from structubim_handler import (
+        find_cantidades, generate_structubim_json,
+        CANTIDADES_TYPE_SUFFIX,
+    )
+
+    try:
+        # Parse element_type_sources
+        try:
+            element_type_sources = json.loads(element_type_sources_json)
+        except json.JSONDecodeError as je:
+            return {"error": f"Invalid JSON for element_type_sources_json: {je}"}
+
+        if not isinstance(element_type_sources, dict) or not element_type_sources:
+            return {"error": "element_type_sources_json must be a non-empty JSON dict mapping element type to variant project name."}
+
+        # Validate element type keys
+        invalid_keys = [k for k in element_type_sources if k not in VALID_ELEMENT_TYPES]
+        if invalid_keys:
+            return {"error": f"Invalid element types: {invalid_keys}. Valid types: {list(VALID_ELEMENT_TYPES)}"}
+
+        # Build solution folder name
+        solution_folder_name = f"{source_project}_sol_{solution_name}"
+        solution_dir = project_dir(solution_folder_name)
+        solution_json_path = os.path.join(solution_dir, "solution.json")
+
+        if os.path.isfile(solution_json_path):
+            return {"error": f"Solution '{solution_folder_name}' already exists. Choose a different name."}
+
+        # Validate all variant folders and resolve xlsx files BEFORE creating anything
+        resolved_sources = {}  # {etype: {variant, xlsx_path, cantidades_path}}
+        for etype, variant_name in element_type_sources.items():
+            variant_dir = project_dir(variant_name)
+            if not os.path.isdir(variant_dir):
+                return {"error": f"Variant folder not found: {variant_name}"}
+
+            xlsx_path = _resolve_reinforcement_file(variant_name, etype)
+            if not xlsx_path:
+                return {"error": f"No reinforcement file for {etype} in {variant_name}. Run ProDet first."}
+
+            # Check for cantidades (non-blocking)
+            suffix = CANTIDADES_TYPE_SUFFIX.get(etype, "")
+            cantidades_path = os.path.join(variant_dir, f"cantidades{suffix}.json")
+            has_cantidades = os.path.isfile(cantidades_path)
+
+            resolved_sources[etype] = {
+                "variant": variant_name,
+                "variant_dir": variant_dir,
+                "xlsx_path": xlsx_path,
+                "cantidades_path": cantidades_path if has_cantidades else None,
+            }
+
+        # Create solution folder
+        os.makedirs(solution_dir, exist_ok=True)
+
+        xlsx_files = {}
+        cantidades_files = {}
+        warnings = []
+
+        # Copy xlsx files with standard names
+        for etype, src_info in resolved_sources.items():
+            dest_name = SOLUTION_XLSX_NAMES[etype]
+            dest_path = os.path.join(solution_dir, dest_name)
+            shutil.copy2(src_info["xlsx_path"], dest_path)
+            xlsx_files[etype] = dest_name
+            logger.info(f"Copied {etype} xlsx from {src_info['variant']} -> {dest_name}")
+
+            # Copy cantidades type-specific file
+            if src_info["cantidades_path"]:
+                suffix = CANTIDADES_TYPE_SUFFIX.get(etype, "")
+                cant_dest_name = f"cantidades{suffix}.json"
+                cant_dest_path = os.path.join(solution_dir, cant_dest_name)
+                shutil.copy2(src_info["cantidades_path"], cant_dest_path)
+                cantidades_files[etype] = cant_dest_name
+                logger.info(f"Copied {etype} cantidades from {src_info['variant']}")
+            else:
+                warnings.append(f"No cantidades file for {etype} in {src_info['variant']} — StructuBim will be skipped for this type.")
+
+        # Copy project.config from source project (for reference)
+        source_config = os.path.join(project_dir(source_project), "project.config")
+        if os.path.isfile(source_config):
+            shutil.copy2(source_config, os.path.join(solution_dir, "project.config"))
+
+        # Run pipeline
+        pipeline_result = None
+        artifacts = {}
+        if run_pipeline:
+            xlsx_paths = [os.path.join(solution_dir, xlsx_files[et]) for et in xlsx_files]
+            pipeline_script = os.path.join(RC_AGENT_ROOT, "run_rebar_pipeline.py")
+
+            if os.path.isfile(pipeline_script):
+                try:
+                    cmd = [sys.executable, pipeline_script, "-x"] + xlsx_paths + ["-d", solution_dir]
+                    pipe_proc = subprocess.run(
+                        cmd,
+                        cwd=RC_AGENT_ROOT,
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                    )
+                    for artifact_name in PIPELINE_ARTIFACTS:
+                        artifacts[artifact_name] = os.path.isfile(os.path.join(solution_dir, artifact_name))
+
+                    pipeline_result = {
+                        "success": pipe_proc.returncode == 0,
+                        "return_code": pipe_proc.returncode,
+                        "artifacts": artifacts,
+                        "stderr": pipe_proc.stderr[-500:] if pipe_proc.stderr else "",
+                    }
+                except subprocess.TimeoutExpired:
+                    pipeline_result = {"success": False, "error": "Pipeline timed out after 120s"}
+            else:
+                pipeline_result = {"success": False, "error": f"Pipeline script not found: {pipeline_script}"}
+
+        # Generate StructuBim JSON with ALL variants for each element type.
+        # Use type-specific cantidades files (cantidades_V.json, cantidades_N.json)
+        # only — NOT the plain cantidades.json fallback, which could belong to a
+        # different element type (e.g. a vigas variant's cantidades.json would
+        # incorrectly appear in nervios.json).
+        structubim_files = {}
+        projects_root = os.path.dirname(solution_dir)
+        source_prefix = source_project + "_"
+        for etype in element_type_sources:
+            try:
+                suffix = CANTIDADES_TYPE_SUFFIX.get(etype, "")
+                typed_file = f"cantidades{suffix}.json"
+
+                family: Dict[str, str] = {}
+                # Include source project if it has type-specific cantidades
+                source_dir_path = project_dir(source_project)
+                if os.path.isfile(os.path.join(source_dir_path, typed_file)):
+                    family[source_project] = source_dir_path
+                # Scan variant folders (skip solution folders)
+                for entry in sorted(os.listdir(projects_root)):
+                    if not entry.startswith(source_prefix):
+                        continue
+                    if "_sol_" in entry:
+                        continue
+                    vdir = os.path.join(projects_root, entry)
+                    if os.path.isdir(vdir) and os.path.isfile(os.path.join(vdir, typed_file)):
+                        family[entry] = vdir
+
+                if not family:
+                    continue
+                sb_result = generate_structubim_json(
+                    project_paths=family,
+                    output_path=os.path.join(solution_dir, f"{etype}.json"),
+                    element_types=[etype],
+                )
+                if sb_result.get("success"):
+                    structubim_files[etype] = f"{etype}.json"
+            except Exception as sb_err:
+                logger.warning(f"StructuBim generation failed for {etype}: {sb_err}")
+
+        # Write solution.json metadata
+        solution_meta = {
+            "source_project": source_project,
+            "solution_name": solution_name,
+            "element_type_sources": element_type_sources,
+            "created_at": datetime.now().isoformat(),
+            "pipeline_ran": run_pipeline and pipeline_result is not None and pipeline_result.get("success", False),
+            "artifacts": artifacts,
+            "xlsx_files": xlsx_files,
+            "cantidades_files": cantidades_files,
+            "structubim_files": structubim_files,
+        }
+        with open(solution_json_path, "w", encoding="utf-8") as f:
+            json.dump(solution_meta, f, indent=2, ensure_ascii=False)
+
+        result = {
+            "success": True,
+            "solution_project": solution_folder_name,
+            "solution_dir": solution_dir,
+            "element_type_sources": element_type_sources,
+            "xlsx_files": xlsx_files,
+            "cantidades_files": cantidades_files,
+            "structubim_files": structubim_files,
+            "pipeline": pipeline_result,
+        }
+        if warnings:
+            result["warnings"] = warnings
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error composing solution: {e}")
+        return {"error": str(e)}
+
+
+@tool
+def list_solutions(
+    source_project: str = "",
+) -> Dict[str, Any]:
+    """List existing solution compositions for a project.
+
+    Scans the projects folder for solution folders containing solution.json.
+    Shows which variants were combined for each element type and when.
+
+    Args:
+        source_project: If provided, filter to solutions for this project
+            (i.e. folders named {source_project}_sol_*). If empty, list all.
+
+    Returns:
+        Dict with list of solutions and count.
+    """
+    try:
+        if not os.path.isdir(RC_AGENT_PROJECTS):
+            return {"error": f"Projects directory not found: {RC_AGENT_PROJECTS}"}
+
+        solutions = []
+        for entry in sorted(os.listdir(RC_AGENT_PROJECTS)):
+            entry_path = os.path.join(RC_AGENT_PROJECTS, entry)
+            if not os.path.isdir(entry_path):
+                continue
+
+            # Filter by source_project prefix if specified
+            if source_project and not entry.startswith(f"{source_project}_sol_"):
+                continue
+            elif not source_project and "_sol_" not in entry:
+                continue
+
+            solution_path = os.path.join(entry_path, "solution.json")
+            if not os.path.isfile(solution_path):
+                continue
+
+            try:
+                with open(solution_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                solutions.append({
+                    "folder": entry,
+                    "source_project": meta.get("source_project", ""),
+                    "solution_name": meta.get("solution_name", ""),
+                    "element_type_sources": meta.get("element_type_sources", {}),
+                    "created_at": meta.get("created_at", ""),
+                    "pipeline_ran": meta.get("pipeline_ran", False),
+                    "xlsx_files": meta.get("xlsx_files", {}),
+                })
+            except (json.JSONDecodeError, KeyError) as e:
+                solutions.append({
+                    "folder": entry,
+                    "error": f"Could not parse solution.json: {e}",
+                })
+
+        return {
+            "solutions": solutions,
+            "total": len(solutions),
+            "filter": source_project or "(all)",
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing solutions: {e}")
         return {"error": str(e)}
 
 
@@ -1096,11 +1417,21 @@ You help users run ProDet (a reinforced concrete design tool) on project files a
    and run ProDet + pipeline for each. ONE tool call handles the entire loop.
    Pass variants_json as a JSON list of {suffix, changes} objects.
 
-9. **generate_structubim_json_tool** — Generate processedAnalysis.json for
-   StructuBim 3D visualizer. Pass comma-separated project names and element
-   types. Processes cantidades.json files (volumes, weights, bar types,
-   complexity scores) and writes the output file. Upload the result to
-   structu-bim.com for 3D reinforcement visualization.
+9. **generate_structubim_json_tool** — Generate StructuBim JSON files for 3D
+   visualization. Produces one file per element type (e.g. vigas.json,
+   nervios.json) so they can be uploaded independently to structu-bim.com.
+   Pass comma-separated project names and element types. Processes
+   cantidades.json files (volumes, weights, bar types, complexity scores).
+
+10. **compose_solution** — Create a building solution by combining reinforcement
+    from different element-type variants into a single project folder. After
+    running parametric studies on vigas and nervios separately, use this tool
+    to pick the best variant for each element type. The solution folder contains
+    merged pipeline artifacts, so Procurement and Scheduling agents work with
+    it directly as a normal project.
+
+11. **list_solutions** — List existing solution compositions for a project.
+    Shows which variants were combined for each element type and when.
 
 == PARAMETRIC STUDY WORKFLOW ==
 
@@ -1135,6 +1466,39 @@ The long_homog parameter controls bar cutting length multiples:
 
 This applies per element type: vigas.param_despiece.long_homog,
 nervios.param_despiece.long_homog, columnas.param_despiece.long_homog.
+
+== SOLUTION COMPOSITION WORKFLOW ==
+
+Vigas and nervios are independently parameterized — users run separate
+parametric studies for each element type, then pick the best variant per type
+to form a building solution.
+
+Typical flow:
+1. Parametric study for vigas → mokara_lh10cm, mokara_lh50cm, mokara_lh100cm
+2. Parametric study for nervios → mokara_n_lh10cm, mokara_n_lh50cm
+3. User reviews results and selects: beams from mokara_lh50cm + joists from mokara_n_lh10cm
+4. Compose the solution:
+
+  compose_solution(
+    source_project="mokara",
+    element_type_sources_json='{"vigas": "mokara_lh50cm", "nervios": "mokara_n_lh10cm"}',
+    solution_name="balanced"
+  )
+
+This creates projects/mokara_sol_balanced/ containing:
+- reinforcement_solution_V.xlsx (from mokara_lh50cm)
+- reinforcement_solution_N.xlsx (from mokara_n_lh10cm)
+- solution.json (records which variants were used)
+- Pipeline artifacts (elements.json, work_packages.json, floor_schedule.json)
+
+The solution folder is a regular project folder — tell the user they can:
+  "Review the reinforcement for mokara_sol_balanced" (Procurement Agent)
+  "What is the floor schedule for mokara_sol_balanced?" (Scheduling Agent)
+
+When to suggest composition:
+- After completing parametric studies on different element types
+- User asks to combine vigas from one variant with nervios from another
+- User wants a "final design" assembled from variant studies
 
 == ELEMENT TYPES ==
 
@@ -1249,6 +1613,8 @@ For example, running ProDet for project "mokara" stores files in projects/mokara
             update_config,
             run_parametric_study,
             generate_structubim_json_tool,
+            compose_solution,
+            list_solutions,
         ]
 
         self.agent = create_react_agent(
@@ -1261,7 +1627,7 @@ For example, running ProDet for project "mokara" stores files in projects/mokara
         self,
         user_input: str,
         chat_history: Optional[List] = None,
-        max_iterations: int = 80,
+        max_iterations: int = 40,
     ) -> str:
         """
         Run the ProDet agent on a user query.
@@ -1269,11 +1635,7 @@ For example, running ProDet for project "mokara" stores files in projects/mokara
         Args:
             user_input: The user's question or request.
             chat_history: Optional list of previous messages for context.
-            max_iterations: Maximum number of agent iterations (default: 80).
-                           Higher than other agents because parametric studies
-                           require many reasoning + tool-call turns
-                           (config inspection, variant creation, ProDet runs,
-                           result loading and comparison across variants).
+            max_iterations: Maximum number of agent iterations (default: 40).
 
         Returns:
             The final assistant message content as a string.

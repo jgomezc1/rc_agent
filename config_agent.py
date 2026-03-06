@@ -261,12 +261,14 @@ def _summarize_element(config: dict, element_key: str) -> Optional[dict]:
     return summary
 
 
-def _extract_floor_names(config: dict) -> List[str]:
+def _extract_floor_names(config: dict, config_dir: str = "") -> List[str]:
     """Extract the ordered list of floor names from a parsed config dict.
 
     Searches vigas.param_despiece.forzar_ref_ppal.por_nivel first (most
     reliable source), then falls back to nervios, then columnas.
-    Returns floor names in config order (top-to-bottom as stored).
+    If por_nivel is empty in all element types (no per-level overrides),
+    falls back to project.geom floorsOrdered (requires config_dir).
+    Returns floor names in top-to-bottom order.
     """
     for element_key in ("vigas", "nervios", "columnas"):
         elem = config.get(element_key, {})
@@ -278,7 +280,59 @@ def _extract_floor_names(config: dict) -> List[str]:
         )
         if isinstance(por_nivel, dict) and por_nivel:
             return list(por_nivel.keys())
+
+    # Fallback: read floor IDs from project.geom
+    if config_dir:
+        geom_path = os.path.join(config_dir, "project.geom")
+        if os.path.isfile(geom_path):
+            try:
+                with open(geom_path, "r", encoding="utf-8") as f:
+                    geom = json.load(f)
+                floors_ordered = geom.get("floorsOrdered", [])
+                if floors_ordered:
+                    return [
+                        entry[0] if isinstance(entry, list) else entry
+                        for entry in floors_ordered
+                    ]
+            except Exception as e:
+                logger.warning(f"Could not read floorsOrdered from project.geom: {e}")
+
     return []
+
+
+def _build_floor_id_map(config_dir: str, display_names: List[str]) -> Dict[str, str]:
+    """Build a mapping from por_nivel display names to project.geom internal IDs.
+
+    Uses positional correspondence: por_nivel keys and floorsOrdered in
+    project.geom are both top-to-bottom ordered and have the same length.
+
+    Returns {display_name: internal_id}. Falls back to identity mapping
+    (display_name → display_name) if project.geom is unavailable or the
+    lists don't match in length.
+    """
+    geom_path = os.path.join(config_dir, "project.geom")
+    if not os.path.isfile(geom_path):
+        return {n: n for n in display_names}
+
+    try:
+        with open(geom_path, "r", encoding="utf-8") as f:
+            geom = json.load(f)
+        floors_ordered = geom.get("floorsOrdered", [])
+        if len(floors_ordered) != len(display_names):
+            logger.warning(
+                f"floorsOrdered ({len(floors_ordered)}) and por_nivel "
+                f"({len(display_names)}) have different lengths — "
+                f"falling back to identity mapping"
+            )
+            return {n: n for n in display_names}
+
+        return {
+            display: entry[0] if isinstance(entry, list) else entry
+            for display, entry in zip(display_names, floors_ordered)
+        }
+    except Exception as e:
+        logger.warning(f"Could not load project.geom for floor ID mapping: {e}")
+        return {n: n for n in display_names}
 
 
 # =============================================================================
@@ -334,7 +388,7 @@ def load_config_summary(config_path: str) -> Dict[str, Any]:
                 result["element_types"][etype] = summary
 
         # Floor names (ordered as stored in config — top-to-bottom)
-        result["floors"] = _extract_floor_names(config)
+        result["floors"] = _extract_floor_names(config, os.path.dirname(resolved))
 
         # Floor groups (grupos_niveles)
         raw_groups = config.get("grupos_niveles", [])
@@ -539,10 +593,6 @@ def set_floor_groups(
     """
     Create or replace floor-level groupings (grupos_niveles) in a project.config.
 
-    Groups geometrically identical floors so they receive identical reinforcement
-    computed from the envelope of forces. Each group must contain ≥2 consecutive
-    floors within the declared identical range.
-
     IMPORTANT: Before calling this tool you MUST ask the user which floors are
     geometrically identical. Pass their answer as identical_range_start/end.
 
@@ -580,10 +630,11 @@ def set_floor_groups(
         if not isinstance(groups, list) or not all(isinstance(g, list) for g in groups):
             return {"error": "groups_json must be a JSON list of lists (e.g. [[\"A\",\"B\"],[\"C\",\"D\"]])"}
 
-        # Extract ordered floor names from config
-        all_floors = _extract_floor_names(config)
+        # Extract ordered floor names from config (falls back to project.geom)
+        src_dir = os.path.dirname(resolved_input)
+        all_floors = _extract_floor_names(config, src_dir)
         if not all_floors:
-            return {"error": "Could not extract floor names from config. The config may be missing per-level data."}
+            return {"error": "Could not extract floor names from config or project.geom."}
 
         # ── Validation layer 1: All floor names exist ──
         all_floor_set = set(all_floors)
@@ -663,11 +714,19 @@ def set_floor_groups(
             return {"error": "Floor(s) appear in multiple groups", "duplicates": duplicates}
 
         # ── Generate grupos_niveles array ──
+        # Translate display names to ProDet-internal floor IDs (from project.geom)
+        src_dir = os.path.dirname(resolved_input)
+        floor_id_map = _build_floor_id_map(src_dir, all_floors)
+
         grupos_niveles = []
         for group in groups:
+            internal_ids = [floor_id_map[fname] for fname in group]
+            # id = "(BOTTOM - TOP)" range string, bottom floor first
+            sorted_by_pos = sorted(group, key=lambda f: all_floors.index(f))
+            group_id = f"({sorted_by_pos[-1]} - {sorted_by_pos[0]})"
             grupos_niveles.append({
-                "id": ", ".join(group),
-                "niveles": list(group),
+                "id": group_id,
+                "niveles": internal_ids,
                 "modoAgrupacion": "envolvente",
             })
 

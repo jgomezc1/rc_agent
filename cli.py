@@ -19,6 +19,9 @@ import time
 import itertools
 from langchain_core.messages import HumanMessage, AIMessage
 
+# Chat history sliding window — keep last N human+AI message pairs
+MAX_HISTORY_PAIRS = 5
+
 # ANSI color codes
 GREEN = "\033[92m"
 CYAN = "\033[96m"
@@ -225,6 +228,10 @@ def run_interactive(agent, agent_info, active_project: str = None):
             chat_history.append(HumanMessage(content=message))
             chat_history.append(AIMessage(content=response))
 
+            # Sliding window: keep only the last N pairs to cap token cost
+            if len(chat_history) > MAX_HISTORY_PAIRS * 2:
+                chat_history[:] = chat_history[-(MAX_HISTORY_PAIRS * 2):]
+
         except Exception as e:
             print(f"{YELLOW}Error:{RESET} {e}\n")
 
@@ -326,10 +333,11 @@ def _run_config_impact_workflow(project: str, intent: str) -> int:
         for msg in result.get("messages", []):
             print(f"  {msg}")
 
-    structubim_path = result.get("structubim_output")
-    if structubim_path:
+    structubim_paths = result.get("structubim_output")
+    if structubim_paths:
         print(f"\n{CYAN}StructuBim Output:{RESET}")
-        print(f"  File: {structubim_path}")
+        for sb_path in structubim_paths:
+            print(f"  File: {sb_path}")
         print(f"  Upload to structu-bim.com to visualize 3D reinforcement comparison")
 
     return 0

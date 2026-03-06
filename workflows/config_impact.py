@@ -77,7 +77,7 @@ class ConfigImpactState(TypedDict, total=False):
     narrative: str
 
     # After generate_structubim
-    structubim_output: Optional[str]
+    structubim_output: Optional[List[str]]
 
     # Status tracking
     messages: List[str]
@@ -622,7 +622,7 @@ def _merge_comparisons(comparisons: Dict[str, Dict[str, Any]]) -> Dict[str, Any]
 # =============================================================================
 
 def generate_structubim(state: ConfigImpactState) -> dict:
-    """Generate processedAnalysis.json with baseline + variant for StructuBim."""
+    """Generate per-element-type StructuBim JSON files for baseline + variant."""
     from structubim_handler import find_cantidades, generate_structubim_json
     from prodet_agent import PRODET_PROJECTS
 
@@ -634,25 +634,30 @@ def generate_structubim(state: ConfigImpactState) -> dict:
     baseline_path = os.path.join(PRODET_PROJECTS, project_name)
     variant_path = os.path.join(PRODET_PROJECTS, variant_name)
 
-    project_paths = {}
-    for name, path in [(project_name, baseline_path), (variant_name, variant_path)]:
-        data = find_cantidades(path, element_types)
-        if data:
-            project_paths[name] = path
+    output_paths = []
+    for etype in element_types:
+        etype_project_paths = {}
+        for name, path in [(project_name, baseline_path), (variant_name, variant_path)]:
+            data = find_cantidades(path, [etype])
+            if data:
+                etype_project_paths[name] = path
 
-    if not project_paths:
-        messages.append("No cantidades.json found — skipping StructuBim generation")
-        return {"structubim_output": None, "messages": messages}
+        if not etype_project_paths:
+            messages.append(f"No cantidades.json found for {etype} — skipping")
+            continue
 
-    output_path = os.path.join(variant_path, "processedAnalysis.json")
-    result = generate_structubim_json(project_paths, output_path, element_types)
+        out = os.path.join(variant_path, f"{etype}.json")
+        result = generate_structubim_json(etype_project_paths, out, [etype])
+        if result.get("success"):
+            output_paths.append(out)
+            messages.append(f"StructuBim JSON generated: {out}")
+        else:
+            messages.append(f"StructuBim generation warning for {etype}: {result.get('error', 'unknown')}")
 
-    if result.get("success"):
-        messages.append(f"StructuBim JSON generated: {output_path}")
-        return {"structubim_output": output_path, "messages": messages}
-    else:
-        messages.append(f"StructuBim generation warning: {result.get('error', 'unknown')}")
-        return {"structubim_output": None, "messages": messages}
+    return {
+        "structubim_output": output_paths if output_paths else None,
+        "messages": messages,
+    }
 
 
 # =============================================================================

@@ -1,31 +1,42 @@
 #!/usr/bin/env python3
 """
-StructuBim Handler — processes ProDet's cantidades.json into processedAnalysis.json.
+StructuBim Handler — processes ProDet's cantidades.json into per-element-type
+JSON files for StructuBim (structu-bim.com), a 3D reinforcement visualizer.
 
-processedAnalysis.json is the input file for StructuBim (structu-bim.com), a 3D
-reinforcement visualizer. This module consolidates the standalone handler logic
-(element_processor, complexity_scores, result_processor) into a single file and
-adds cantidades.json merge functions to handle the overwrite problem (ProDet
+Each element type gets its own output file (e.g. vigas.json, nervios.json) so
+they can be uploaded independently to structu-bim.com. Callers invoke
+generate_structubim_json() once per element type with a single-item list.
+
+This module consolidates the standalone handler logic (element_processor,
+complexity_scores, result_processor) into a single file and adds
+cantidades.json merge functions to handle the overwrite problem (ProDet
 deletes cantidades.json at the start of each element-type run).
 
 Usage from code:
     from structubim_handler import find_cantidades, generate_structubim_json
 
-    # Single project
+    # Single project, single element type → vigas.json
     result = generate_structubim_json(
         project_paths={"mokara": "projects/mokara/"},
-        output_path="projects/mokara/processedAnalysis.json",
-        element_types=["vigas", "nervios"],
+        output_path="projects/mokara/vigas.json",
+        element_types=["vigas"],
     )
 
-    # Compare two variants (baseline vs variant)
+    # Same project, nervios → nervios.json (separate call)
+    result = generate_structubim_json(
+        project_paths={"mokara": "projects/mokara/"},
+        output_path="projects/mokara/nervios.json",
+        element_types=["nervios"],
+    )
+
+    # Compare two variants for one element type
     result = generate_structubim_json(
         project_paths={
             "mokara": "projects/mokara/",
             "mokara_speed": "projects/mokara_speed/",
         },
-        output_path="projects/mokara_speed/processedAnalysis.json",
-        element_types=["vigas", "nervios"],
+        output_path="projects/mokara_speed/vigas.json",
+        element_types=["vigas"],
     )
 """
 
@@ -619,16 +630,18 @@ def generate_structubim_json(
     output_path: str,
     element_types: List[str] = None,
 ) -> Dict[str, Any]:
-    """Generate processedAnalysis.json for StructuBim.
+    """Generate a StructuBim JSON file for one element type.
 
     Finds cantidades.json files for the given projects, processes reinforcement
-    data (volumes, weights, complexity scores), and writes processedAnalysis.json.
+    data (volumes, weights, complexity scores), and writes the output file.
+    Callers should invoke once per element type with a single-item list
+    (e.g. ["vigas"]) and a matching output path (e.g. "vigas.json").
 
     Args:
         project_paths: {variant_name: project_folder_path}
-        output_path: Where to write processedAnalysis.json.
-        element_types: e.g. ["vigas", "nervios"]. If None, tries to load
-            whatever cantidades files exist.
+        output_path: Where to write the output (e.g. "projects/mokara/vigas.json").
+        element_types: e.g. ["vigas"]. If None, tries to load whatever
+            cantidades files exist.
 
     Returns:
         {success, output_path, variants: {name: {elements, bar_types, concrete_volume}},
