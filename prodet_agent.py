@@ -28,7 +28,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
 from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
 
 # Load environment variables
@@ -1405,33 +1405,25 @@ You help users run ProDet (a reinforced concrete design tool) on project files a
    complexity_index -> productivity -> work_packages -> floor_schedule) to
    generate the 5 JSON artifacts used by the other agents.
 
-6. **load_config_summary** — Read a project.config and return a curated
-   summary of the ~30 engineering-relevant parameters. Pass either a full
-   path or just the project name (e.g. "mokara").
-
-7. **update_config** — Apply dot-path keyed changes to an existing config
-   file. Automatically copies companion files when writing to a new folder.
-   Example changes_json: {"vigas.param_despiece.long_homog": 1}
-
-8. **run_parametric_study** — Batch tool: create multiple config variants
+6. **run_parametric_study** — Batch tool: create multiple config variants
    and run ProDet + pipeline for each. ONE tool call handles the entire loop.
    Pass variants_json as a JSON list of {suffix, changes} objects.
 
-9. **generate_structubim_json_tool** — Generate StructuBim JSON files for 3D
+7. **generate_structubim_json_tool** — Generate StructuBim JSON files for 3D
    visualization. Produces one file per element type (e.g. vigas.json,
    nervios.json) so they can be uploaded independently to structu-bim.com.
    Pass comma-separated project names and element types. Processes
    cantidades.json files (volumes, weights, bar types, complexity scores).
 
-10. **compose_solution** — Create a building solution by combining reinforcement
-    from different element-type variants into a single project folder. After
-    running parametric studies on vigas and nervios separately, use this tool
-    to pick the best variant for each element type. The solution folder contains
-    merged pipeline artifacts, so Procurement and Scheduling agents work with
-    it directly as a normal project.
+8. **compose_solution** — Create a building solution by combining reinforcement
+   from different element-type variants into a single project folder. After
+   running parametric studies on vigas and nervios separately, use this tool
+   to pick the best variant for each element type. The solution folder contains
+   merged pipeline artifacts, so Procurement and Scheduling agents work with
+   it directly as a normal project.
 
-11. **list_solutions** — List existing solution compositions for a project.
-    Shows which variants were combined for each element type and when.
+9. **list_solutions** — List existing solution compositions for a project.
+   Shows which variants were combined for each element type and when.
 
 == PARAMETRIC STUDY WORKFLOW ==
 
@@ -1595,6 +1587,7 @@ For example, running ProDet for project "mokara" stores files in projects/mokara
 - After a successful full run, remind the user they can now use the other agents
   (Procurement, Scheduling, Grouping) to analyze the processed data, pointing
   them to the project subfolder path (e.g. projects/mokara/)
+- To view or modify ProDet configuration parameters, instruct the user to switch to the Config Agent.
 """
 
     def __init__(self, model_name: str = "claude-sonnet-4-6", temperature: float = 0.0):
@@ -1602,6 +1595,7 @@ For example, running ProDet for project "mokara" stores files in projects/mokara
         self.llm = ChatAnthropic(
             model=model_name,
             temperature=temperature,
+            max_tokens=4096,
         )
         self.tools = [
             list_projects,
@@ -1609,25 +1603,27 @@ For example, running ProDet for project "mokara" stores files in projects/mokara
             run_prodet,
             copy_output_to_rc_agent,
             run_data_pipeline,
-            load_config_summary,
-            update_config,
             run_parametric_study,
             generate_structubim_json_tool,
             compose_solution,
             list_solutions,
         ]
-
+        self.system_message = SystemMessage(
+            content=self.SYSTEM_PROMPT,
+            additional_kwargs={"cache_control": {"type": "ephemeral"}},
+        )
         self.agent = create_react_agent(
             self.llm,
             tools=self.tools,
-            prompt=self.SYSTEM_PROMPT,
+            prompt=self.system_message,
         )
 
     def run(
         self,
         user_input: str,
         chat_history: Optional[List] = None,
-        max_iterations: int = 40,
+        max_iterations: int = 20,
+        token_callback=None,
     ) -> str:
         """
         Run the ProDet agent on a user query.
@@ -1635,7 +1631,8 @@ For example, running ProDet for project "mokara" stores files in projects/mokara
         Args:
             user_input: The user's question or request.
             chat_history: Optional list of previous messages for context.
-            max_iterations: Maximum number of agent iterations (default: 40).
+            max_iterations: Maximum number of agent iterations (default: 20).
+            token_callback: Optional shared TokenCounterCallback for session tracking.
 
         Returns:
             The final assistant message content as a string.
@@ -1647,9 +1644,16 @@ For example, running ProDet for project "mokara" stores files in projects/mokara
 
         messages.append(HumanMessage(content=user_input))
 
+        if token_callback:
+            token_callback.set_current_agent("prodet", model=self.llm.model)
+            token_cb = token_callback
+        else:
+            from utils.token_logger import TokenCounterCallback
+            token_cb = TokenCounterCallback(agent_name="prodet")
+
         result = self.agent.invoke(
             {"messages": messages},
-            config={"recursion_limit": max_iterations},
+            config={"recursion_limit": max_iterations, "callbacks": [token_cb]},
         )
 
         if result.get("messages"):

@@ -33,9 +33,6 @@ python productivity.py -i projects/elements_with_ci.json -o projects/elements_wi
 python work_packages.py -i projects/elements_with_prod.json -o projects/work_packages.json
 python floor_schedule.py -i projects/work_packages.json -o projects/floor_schedule.json
 
-# Run a workflow
-python cli.py --workflow config-impact mokara "simplify for faster construction"
-
 # Run tests
 python test_optimizer.py
 ```
@@ -61,7 +58,7 @@ reinforcement_solution.xlsx
 |-------|--------|---------|-----------|
 | Grouping Optimizer | `grouping_optimizer.py` | Estimate floor groupings, user selects, create config, run ProDet, compare results | `load_baseline_steel`, `estimate_groupings`, `apply_grouping`, `compare_grouping_results` |
 | Procurement | `procurement_agent.py` | Review reinforcement files, generate bar lists & PDF reports | `load_reinforcement_file`, `list_available_floors`, `get_floor_data`, `analyze_bars_by_diameter`, `analyze_bars_by_shape`, `generate_pdf_report` |
-| Scheduling | `scheduling_agent.py` | Plan rebar installation schedules | `compute_floor_schedule_tool`, `analyze_bottleneck`, `compare_scenarios` |
+| Scheduling | `scheduling_agent.py` | Plan rebar installation schedules | `compute_floor_schedule_tool`, `load_floor_schedule_tool` |
 | ProDet Runner | `prodet_agent.py` | Run ProDet, copy output, run data pipeline | `list_projects`, `inspect_project`, `run_prodet`, `copy_output_to_rc_agent`, `run_data_pipeline` |
 | Config Agent | `config_agent.py` | NL ↔ project.config translation — describe design intent, modify configs & set up floor groupings | `load_config_summary`, `update_config`, `set_floor_groups` |
 
@@ -99,29 +96,6 @@ The Config Agent uses a structured reasoning framework to translate between natu
 - `parameter_semantic_catalog_guide.md` — parameter clusters, Simple/Balanced/Optimized values, floor grouping trade-off table
 - `impact_matrix_guide.md` — causal impact of each cluster on the 8 dimensions, plus floor grouping row
 - `archetype_profiles_guide.md` — complete archetype parameter snapshots
-
-### Workflows
-
-Multi-step automated pipelines implemented as LangGraph `StateGraph` with explicit nodes. Unlike agents (which are free-form ReAct loops), workflows follow a fixed node sequence with optional LLM nodes and user interrupts.
-
-**Workflow 1: Config Impact Analysis** (`workflows/config_impact.py`)
-
-Automates the loop: load baseline config → LLM proposes changes → user confirms → create variant → run ProDet → compare reinforcement → LLM narrates trade-off.
-
-```
-load_baseline → propose_changes (LLM) → [interrupt: user confirms]
-                                              │
-                                        create_variant → run_prodet_all → compare_all → narrate_tradeoff (LLM)
-```
-
-Run: `python cli.py --workflow config-impact <project> "<intent>"`
-Example: `python cli.py --workflow config-impact mokara "simplify for faster construction"`
-
-Produces a trade-off narrative with specific numbers, e.g.: "Switching from Balanced to Simple costs 847 kg more steel (+11.3%) but eliminates 142 unique bar entries (-58%)."
-
-Key tool: `compare_reinforcement` in `procurement_agent.py` — diffs `Resumen_Refuerzo`, `RefLong_Total`, and `RefTrans_Total` between two project folders.
-
-Reuses internal helpers from `prodet_agent.py` (`_create_variant_config`, `_run_prodet_single`) and `config_agent.py` (`load_config_summary`).
 
 ### Solution Composition
 

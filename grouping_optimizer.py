@@ -919,6 +919,7 @@ Step 6: Report actual results:
         self.llm = ChatAnthropic(
             model=model_name,
             temperature=temperature,
+            max_tokens=4096,
         )
         self.tools = [
             load_baseline_steel,
@@ -926,21 +927,25 @@ Step 6: Report actual results:
             apply_grouping,
             compare_grouping_results,
         ]
-
+        self.system_message = SystemMessage(
+            content=self.SYSTEM_PROMPT,
+            additional_kwargs={"cache_control": {"type": "ephemeral"}},
+        )
         self.agent = create_react_agent(
             self.llm,
             tools=self.tools,
-            prompt=self.SYSTEM_PROMPT,
+            prompt=self.system_message,
         )
 
-    def run(self, user_input: str, chat_history: Optional[List] = None, max_iterations: int = 40) -> str:
+    def run(self, user_input: str, chat_history: Optional[List] = None, max_iterations: int = 20, token_callback=None) -> str:
         """
         Execute the agent with user input.
 
         Args:
             user_input: User's request/query
             chat_history: Optional conversation history
-            max_iterations: Maximum agent iterations (default: 40 for multi-step flow)
+            max_iterations: Maximum agent iterations (default: 20)
+            token_callback: Optional shared TokenCounterCallback for session tracking.
 
         Returns:
             Agent's response string
@@ -950,9 +955,16 @@ Step 6: Report actual results:
             messages.extend(chat_history)
         messages.append(HumanMessage(content=user_input))
 
+        if token_callback:
+            token_callback.set_current_agent("grouping", model=self.llm.model)
+            token_cb = token_callback
+        else:
+            from utils.token_logger import TokenCounterCallback
+            token_cb = TokenCounterCallback(agent_name="grouping")
+
         result = self.agent.invoke(
             {"messages": messages},
-            config={"recursion_limit": max_iterations},
+            config={"recursion_limit": max_iterations, "callbacks": [token_cb]},
         )
 
         if result.get("messages"):

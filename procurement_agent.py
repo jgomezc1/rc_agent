@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
 
 # Load environment variables
@@ -748,7 +748,8 @@ class ReinforcementFileReviewer:
 
 @tool
 def review_reinforcement_file(
-    file_path: str = "projects/reinforcement_solution.xlsx"
+    file_path: str = "projects/reinforcement_solution.xlsx",
+    summary_only: bool = True,
 ) -> Dict[str, Any]:
     """
     Review a reinforcement solution file for completeness and clarity.
@@ -756,6 +757,8 @@ def review_reinforcement_file(
     Args:
         file_path: Path to the reinforcement solution file (.xlsx or .csv).
                   Default: "projects/reinforcement_solution.xlsx"
+        summary_only: If True (default), return condensed summary without
+                     per-column sample values or raw validation details.
 
     Returns:
         Dictionary with per-sheet validation results, data summary, and recommendations.
@@ -763,7 +766,26 @@ def review_reinforcement_file(
     try:
         reviewer = ReinforcementFileReviewer()
         result = reviewer.review(file_path)
-        return result.model_dump()
+        full = result.model_dump()
+
+        if not summary_only:
+            return full
+
+        # Condensed summary: strip per-column samples and raw validation details
+        error_count = sum(1 for i in full.get("validation_issues", []) if i.get("severity") == "error")
+        warning_count = sum(1 for i in full.get("validation_issues", []) if i.get("severity") == "warning")
+        return {
+            "file_path": full.get("file_path"),
+            "file_size_kb": full.get("file_size_kb"),
+            "sheets_count": full.get("sheets_count"),
+            "sheet_names": [s.get("sheet_name") for s in full.get("sheets", [])],
+            "total_rows": full.get("total_rows"),
+            "is_valid": full.get("is_valid"),
+            "error_count": error_count,
+            "warning_count": warning_count,
+            "data_summary": full.get("data_summary"),
+            "recommendations": full.get("recommendations"),
+        }
     except Exception as e:
         logger.error(f"File review failed: {str(e)}")
         return {"error": str(e)}
@@ -1930,13 +1952,22 @@ def compare_reinforcement(
             stats.pop("floors", None)
             stats.pop("diameter_weights_tonf", None)
 
+        # Cap floor-level comparison to top 5 by absolute delta + totals
+        floor_comparison_sorted = sorted(
+            floor_comparison,
+            key=lambda fc: abs(fc["variant_tonf"] - fc["baseline_tonf"]),
+            reverse=True,
+        )
+        floor_comparison_top5 = floor_comparison_sorted[:5]
+
         return _sanitize_for_json({
             "element_type": element_type,
             "baseline": base_stats,
             "variant": var_stats,
             "delta": delta,
             "diameter_comparison": diameter_comparison,
-            "floor_comparison": floor_comparison,
+            "floor_comparison_top5": floor_comparison_top5,
+            "floor_count": len(floor_comparison),
         })
 
     except Exception as e:
@@ -2148,25 +2179,30 @@ If no project is specified, fall back to "projects/reinforcement_solution.xlsx".
         """Initialize the agent."""
         self.llm = ChatAnthropic(
             model=model_name,
-            temperature=temperature
+            temperature=temperature,
+            max_tokens=4096,
         )
         self.tools = [list_data_files, review_reinforcement_file,
                       list_available_floors, generate_procurement_report,
                       compare_reinforcement]
-
+        self.system_message = SystemMessage(
+            content=self.SYSTEM_PROMPT,
+            additional_kwargs={"cache_control": {"type": "ephemeral"}},
+        )
         self.agent = create_react_agent(
             self.llm,
             tools=self.tools,
-            prompt=self.SYSTEM_PROMPT
+            prompt=self.system_message,
         )
 
-    def run(self, user_input: str, chat_history: Optional[List] = None, max_iterations: int = 15) -> str:
+    def run(self, user_input: str, chat_history: Optional[List] = None, max_iterations: int = 15, token_callback=None) -> str:
         """Execute the agent with user input.
 
         Args:
             user_input: User's request/query
             chat_history: Optional conversation history
             max_iterations: Maximum number of agent iterations to prevent infinite loops (default: 15)
+            token_callback: Optional shared TokenCounterCallback for session tracking.
 
         Returns:
             Agent's response string
@@ -2176,10 +2212,16 @@ If no project is specified, fall back to "projects/reinforcement_solution.xlsx".
             messages.extend(chat_history)
         messages.append(HumanMessage(content=user_input))
 
-        # Invoke with recursion limit to prevent infinite loops
+        if token_callback:
+            token_callback.set_current_agent("procurement", model=self.llm.model)
+            token_cb = token_callback
+        else:
+            from utils.token_logger import TokenCounterCallback
+            token_cb = TokenCounterCallback(agent_name="procurement")
+
         result = self.agent.invoke(
             {"messages": messages},
-            config={"recursion_limit": max_iterations}
+            config={"recursion_limit": max_iterations, "callbacks": [token_cb]},
         )
 
         if result.get("messages"):

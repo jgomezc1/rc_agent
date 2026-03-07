@@ -9,7 +9,6 @@ Usage:
     python cli.py --scheduling "query"      # Scheduling agent single query
     python cli.py --prodet "query"          # ProDet runner single query
     python cli.py --config "query"          # Config agent single query
-    python cli.py --workflow config-impact mokara "simplify for speed"
 """
 
 import argparse
@@ -18,6 +17,7 @@ import threading
 import time
 import itertools
 from langchain_core.messages import HumanMessage, AIMessage
+from utils.token_logger import TokenCounterCallback
 
 # Chat history sliding window — keep last N human+AI message pairs
 MAX_HISTORY_PAIRS = 5
@@ -166,7 +166,7 @@ def _build_message(user_input: str, active_project: str = None) -> str:
     return user_input
 
 
-def run_interactive(agent, agent_info, active_project: str = None):
+def run_interactive(agent, agent_info, active_project: str = None, token_callback=None):
     """Run interactive chat session with an agent.
 
     Returns a tuple (action, active_project) where action is 'menu' or 'exit'.
@@ -221,7 +221,7 @@ def run_interactive(agent, agent_info, active_project: str = None):
         try:
             message = _build_message(user_input, active_project)
             with Spinner("Thinking"):
-                response = agent.run(message, chat_history=chat_history)
+                response = agent.run(message, chat_history=chat_history, token_callback=token_callback)
             print(f"{GREEN}Agent:{RESET} {response}")
             print()
 
@@ -249,98 +249,15 @@ def _parse_args():
     parser.add_argument("--scheduling", nargs=argparse.REMAINDER, help="Scheduling agent query")
     parser.add_argument("--prodet", nargs=argparse.REMAINDER, help="ProDet runner query")
     parser.add_argument("--config", nargs=argparse.REMAINDER, help="Config agent query")
-    parser.add_argument("--workflow", nargs=argparse.REMAINDER,
-                        help="Run a workflow (e.g., config-impact mokara 'simplify for speed')")
     parser.add_argument("-p", "--project", type=str, default=None,
                         help="Set active project (data stored in projects/<project>/)")
     return parser
 
 
-def _run_config_impact_workflow(project: str, intent: str) -> int:
-    """Run the Config Impact Analysis workflow with interrupt/resume."""
-    from workflows.config_impact import build_config_impact_workflow
-    from langgraph.types import Command
-
-    print(f"\n{GREEN}━━━ Config Impact Analysis Workflow ━━━{RESET}")
-    print(f"  Project: {YELLOW}{project}{RESET}")
-    print(f"  Intent:  {intent}\n")
-
-    workflow = build_config_impact_workflow()
-    thread_config = {"configurable": {"thread_id": "cli-config-impact-1"}}
-
-    # Phase 1: run until interrupt (load_baseline + propose_changes)
-    print(f"{CYAN}Phase 1:{RESET} Analyzing baseline and proposing changes...")
-    with Spinner("Analyzing config"):
-        result = workflow.invoke(
-            {"project_name": project, "user_intent": intent, "messages": []},
-            config=thread_config,
-        )
-
-    # Check for errors
-    if result.get("error"):
-        print(f"\n{YELLOW}Error:{RESET} {result['error']}")
-        return 1
-
-    # Display proposed changes (from the interrupted state)
-    state = workflow.get_state(thread_config)
-    vals = state.values
-
-    print(f"\n{GREEN}Proposed Changes:{RESET}")
-    print(f"  Target archetype: {BOLD}{vals.get('archetype_target', '?')}{RESET}")
-    print(f"  Rationale: {vals.get('rationale', '?')}")
-    print(f"  Expected impact: {vals.get('expected_impact', '?')}")
-    print(f"\n  Config modifications:")
-    for path, value in vals.get("proposed_changes", {}).items():
-        print(f"    {path} = {value}")
-    print(f"\n  Variant project: {project}_{vals.get('variant_suffix', '?')}")
-
-    # Ask for confirmation
-    print()
-    try:
-        confirm = input(f"{CYAN}Proceed with these changes? [y/N]:{RESET} ").strip().lower()
-    except (KeyboardInterrupt, EOFError):
-        print("\nAborted.")
-        return 0
-
-    if confirm not in ("y", "yes"):
-        print("Workflow cancelled.")
-        # Resume with False to route to END
-        workflow.invoke(Command(resume=False), config=thread_config)
-        return 0
-
-    # Phase 2: resume with confirmation → create variant → run ProDet → compare → narrate
-    print(f"\n{CYAN}Phase 2:{RESET} Creating variant and running ProDet...")
-    print("  (This may take several minutes per ProDet run)\n")
-
-    result = workflow.invoke(Command(resume=True), config=thread_config)
-
-    # Check for errors
-    if result.get("error"):
-        print(f"\n{YELLOW}Error:{RESET} {result['error']}")
-        return 1
-
-    # Display the narrative
-    narrative = result.get("narrative", "")
-    if narrative:
-        print(f"\n{GREEN}{'=' * 60}{RESET}")
-        print(f"{GREEN}  Config Impact Analysis — Trade-off Report{RESET}")
-        print(f"{GREEN}{'=' * 60}{RESET}\n")
-        print(narrative)
-        print(f"\n{GREEN}{'=' * 60}{RESET}")
-    else:
-        print(f"\n{YELLOW}No narrative generated.{RESET}")
-        # Print whatever messages we have
-        for msg in result.get("messages", []):
-            print(f"  {msg}")
-
-    structubim_paths = result.get("structubim_output")
-    if structubim_paths:
-        print(f"\n{CYAN}StructuBim Output:{RESET}")
-        for sb_path in structubim_paths:
-            print(f"  File: {sb_path}")
-        print(f"  Upload to structu-bim.com to visualize 3D reinforcement comparison")
-
-    return 0
+def _print_receipt(token_cb):
+    """Print session cost receipt if any LLM calls were made."""
+    if token_cb.call_count > 0:
+        print(f"\n{token_cb.format_receipt()}")
 
 
 def main():
@@ -350,33 +267,7 @@ def main():
     args = parser.parse_args()
 
     active_project = args.project
-
-    # Workflow mode — run workflow first, then fall through to interactive menu
-    if args.workflow is not None:
-        wf_args = args.workflow
-        if len(wf_args) < 2:
-            print(f"{YELLOW}Usage:{RESET} --workflow <workflow-name> <project> <intent...>")
-            print(f"  Example: --workflow config-impact mokara \"simplify for speed\"")
-            return 1
-        workflow_name = wf_args[0]
-        project = wf_args[1]
-        intent = " ".join(wf_args[2:]) if len(wf_args) > 2 else ""
-
-        if workflow_name == "config-impact":
-            if not intent:
-                print(f"{YELLOW}Error:{RESET} config-impact workflow requires an intent string.")
-                print(f"  Example: --workflow config-impact mokara \"simplify for faster construction\"")
-                return 1
-            result = _run_config_impact_workflow(project, intent)
-            if result != 0:
-                return result
-            # Set active project to the one used in the workflow
-            active_project = project
-            # Fall through to interactive menu
-        else:
-            print(f"{YELLOW}Unknown workflow:{RESET} {workflow_name}")
-            print(f"  Available workflows: config-impact")
-            return 1
+    token_cb = TokenCounterCallback(agent_name="session")
 
     # Single-query mode: detect which agent flag was used
     agent_modes = [
@@ -407,8 +298,9 @@ def main():
             print()
             print("-" * 60)
             with Spinner(spinner_msg):
-                result = agent.run(message)
+                result = agent.run(message, token_callback=token_cb)
             print(result)
+            _print_receipt(token_cb)
             return 0
 
     # Interactive mode with agent selection
@@ -422,10 +314,12 @@ def main():
             choice = input(f"{CYAN}Select agent [1-{len(AGENTS)}]:{RESET} ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\nGoodbye!")
+            _print_receipt(token_cb)
             return 0
 
         if choice.lower() in ['q', 'quit', 'exit']:
             print("Goodbye!")
+            _print_receipt(token_cb)
             return 0
 
         if choice not in AGENTS:
@@ -443,13 +337,15 @@ def main():
             continue
 
         # Run interactive session
-        action, active_project = run_interactive(agent, agent_info, active_project)
+        action, active_project = run_interactive(agent, agent_info, active_project, token_callback=token_cb)
 
         if action == 'exit':
             print("Goodbye!")
+            _print_receipt(token_cb)
             return 0
         # If 'menu', loop continues to show menu again
 
+    _print_receipt(token_cb)
     return 0
 
 
