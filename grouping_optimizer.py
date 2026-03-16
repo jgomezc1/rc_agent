@@ -908,11 +908,19 @@ Step 6: Report actual results:
 - Default candidate k values: [2, 3, 4] (unless user specifies otherwise)
 - Default productivity: days_first_in_group=10, days_repeated=7
 
+== PROJECT FAMILIES ==
+
+Projects often have multiple variants sharing a base name (e.g. mokara, mokara_v1,
+mokara_sol_balanced). When the user references a project by its base name, use
+**list_project_family** to discover all related variants and ask which one to
+optimize, or assume the base project if only one exists.
+
 == TOOLS ==
 1. load_baseline_steel — Load floor-level steel from existing ProDet output
 2. estimate_groupings — Run combinatorial optimizer, report estimated deltas
 3. apply_grouping — Create config variant, run ProDet, compare actual results
-4. compare_grouping_results — Re-examine or compare different grouped variants"""
+4. compare_grouping_results — Re-examine or compare different grouped variants
+5. list_project_family — List all variants for a project family"""
 
     def __init__(self, model_name: str = "claude-sonnet-4-6", temperature: float = 0.0):
         """Initialize the agent with specified Anthropic model."""
@@ -921,11 +929,13 @@ Step 6: Report actual results:
             temperature=temperature,
             max_tokens=4096,
         )
+        from prodet_agent import list_project_family
         self.tools = [
             load_baseline_steel,
             estimate_groupings,
             apply_grouping,
             compare_grouping_results,
+            list_project_family,
         ]
         self.system_message = SystemMessage(
             content=self.SYSTEM_PROMPT,

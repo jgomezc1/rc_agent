@@ -2169,6 +2169,17 @@ Example PDF requests:
 When a PDF is generated successfully, inform the user of the file path.
 If PDF generation fails, explain the error and still provide the data summary.
 
+== PROJECT FAMILIES ==
+
+Projects often have multiple variants sharing a base name (e.g. mokara, mokara_v1,
+mokara_v2, mokara_sol_balanced). When the user references a project by its base
+name (e.g. "compare all mokara projects" or "review mokara"), use
+**list_project_family** to discover all related variants. Then:
+- If the request is about a single project (e.g. "review mokara"), use that exact folder.
+- If the request implies comparing or reviewing multiple variants (e.g. "compare
+  all mokara variants for vigas"), list all family members and ask the user which
+  ones to compare, or compare all of them if the user says "all".
+
 == PROJECT-SPECIFIC DATA ==
 
 If the user mentions a project name or the message contains [Active project: X],
@@ -2182,9 +2193,10 @@ If no project is specified, fall back to "projects/reinforcement_solution.xlsx".
             temperature=temperature,
             max_tokens=4096,
         )
+        from prodet_agent import list_project_family
         self.tools = [list_data_files, review_reinforcement_file,
                       list_available_floors, generate_procurement_report,
-                      compare_reinforcement]
+                      compare_reinforcement, list_project_family]
         self.system_message = SystemMessage(
             content=self.SYSTEM_PROMPT,
             additional_kwargs={"cache_control": {"type": "ephemeral"}},

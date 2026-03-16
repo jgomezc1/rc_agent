@@ -281,6 +281,13 @@ Present results in clear, structured format:
 - "How long would it take with 10-hour workdays?"
 - "Compare current schedule with double the beam crews"
 
+== PROJECT FAMILIES ==
+
+Projects often have multiple variants sharing a base name (e.g. mokara, mokara_v1,
+mokara_sol_balanced). When the user references a project by its base name, use
+**list_project_family** to discover all related variants and ask which one(s)
+to schedule, or assume all if the user says "all".
+
 == PROJECT-SPECIFIC DATA ==
 
 If the user mentions a project name or the message contains [Active project: X],
@@ -297,7 +304,8 @@ If no project is specified, use the defaults.
             temperature=temperature,
             max_tokens=4096,
         )
-        self.tools = [compute_floor_schedule_tool, load_floor_schedule_tool]
+        from prodet_agent import list_project_family
+        self.tools = [compute_floor_schedule_tool, load_floor_schedule_tool, list_project_family]
         self.system_message = SystemMessage(
             content=self.SYSTEM_PROMPT,
             additional_kwargs={"cache_control": {"type": "ephemeral"}},

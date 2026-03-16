@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 # Path helpers (shared module)
 # =============================================================================
 
-from paths import RC_AGENT_ROOT, RC_AGENT_PROJECTS, project_dir, normalize_path
+from paths import RC_AGENT_ROOT, RC_AGENT_PROJECTS, project_dir, normalize_path, list_project_families, resolve_project_family, base_project_name
 
 # Config agent helpers — used by _create_variant_config and re-exported as tools
 from config_agent import (
@@ -146,16 +146,44 @@ def list_projects() -> Dict[str, Any]:
                 "ready": has_prodes,
             })
 
+        families = list_project_families(PRODET_PROJECTS)
+
         return {
             "projects_dir": PRODET_PROJECTS,
             "prodet_root": PRODET_ROOT,
             "projects": projects,
             "total": len(projects),
+            "families": families,
         }
 
     except Exception as e:
         logger.error(f"Error listing projects: {e}")
         return {"error": str(e)}
+
+
+@tool
+def list_project_family(project_name: str) -> Dict[str, Any]:
+    """
+    List all project folders that belong to the same family as *project_name*.
+
+    A project family shares the same base name. For example, if the user says
+    "mokara", this returns mokara, mokara_v1, mokara_v2, mokara_sol_balanced, etc.
+    Use this tool whenever the user references a project by its base name and
+    you need to know which variants/solutions exist.
+
+    Args:
+        project_name: Any project name or base name (e.g. "mokara" or "mokara_v2").
+
+    Returns:
+        Dictionary with base_name, members (list of folder names), and count.
+    """
+    base = base_project_name(project_name)
+    members = resolve_project_family(project_name, PRODET_PROJECTS)
+    return {
+        "base_name": base,
+        "members": members,
+        "count": len(members),
+    }
 
 
 @tool
@@ -272,12 +300,18 @@ def _run_prodet_single(
     project_path: str,
     element_type: str,
     timeout_seconds: int,
+    wait_for_completion: bool = False,
 ) -> Dict[str, Any]:
     """Run ProDet for a single element type. Internal helper.
 
     Launches ProDet as a background process and polls for the output xlsx.
-    As soon as a fresh output file is detected the process is terminated
-    so we don't wait for drawings/PDFs that aren't needed.
+    By default, as soon as a fresh output file is detected the process is
+    terminated so we don't wait for drawings/PDFs that aren't needed.
+
+    If wait_for_completion is True, the process runs until it finishes
+    naturally (or times out). This is needed when downstream steps
+    (planos/memorias) require intermediate files that are written after
+    the xlsx (e.g. info_graficos_*.json).
     """
     cmd = []
     try:
@@ -323,7 +357,7 @@ def _run_prodet_single(
 
                 # Check if a fresh output file has appeared
                 output_path = _find_prodet_output(project_path, element_type)
-                if output_path is not None:
+                if output_path is not None and not wait_for_completion:
                     new_mtime = os.path.getmtime(output_path)
                     if (old_mtime is None) or (new_mtime > old_mtime):
                         # Excel is ready — kill the process, we're done
@@ -515,6 +549,250 @@ def run_prodet(
 
     except Exception as e:
         logger.error(f"Error running ProDet: {e}")
+        return {"error": str(e)}
+
+
+# Expected output filenames for planos and memorias
+_DXF_OUTPUT_NAMES = {
+    "vigas": "planos_VIGAS.dxf",
+    "nervios": "planos_NERVIOS.dxf",
+}
+
+_MEMORIA_OUTPUT_NAMES = {
+    "vigas": "INFORME_vigas.pdf",
+    "nervios": "INFORME_nervios.pdf",
+}
+
+
+def _run_prodet_postprocess(
+    project_path: str,
+    element_type: str,
+    stage: str,
+    timeout_seconds: int,
+    poll_file: str,
+) -> Dict[str, Any]:
+    """Run a ProDet post-processing stage (generador_dxf or memories_generator).
+
+    Args:
+        project_path: Absolute path to the project folder.
+        element_type: "vigas" or "nervios".
+        stage: "dxf" or "memorias" — selects which module to run.
+        timeout_seconds: Max wait time.
+        poll_file: Absolute path to the expected output file to poll for.
+
+    Returns:
+        Dictionary with success flag, output path, elapsed time.
+    """
+    module_map = {
+        "dxf": os.path.join(PRODET_ROOT, "generador_dxf", "main.py"),
+        "memorias": os.path.join(PRODET_ROOT, "memories_generator", "main.py"),
+    }
+    script = module_map[stage]
+    if not os.path.isfile(script):
+        return {"error": f"{stage} script not found: {script}"}
+
+    project_arg = project_path.rstrip("/\\") + os.sep
+    cmd = [
+        "conda", "run", "-n", PRODET_CONDA_ENV,
+        "python", script, project_arg, element_type,
+    ]
+    logger.info(f"Running ProDet {stage}: {' '.join(cmd)} (cwd={PRODET_ROOT})")
+
+    start_time = datetime.now()
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=PRODET_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        try:
+            # Wait for process to finish or timeout
+            while True:
+                elapsed = (datetime.now() - start_time).total_seconds()
+                ret = proc.poll()
+                if ret is not None:
+                    break
+                if elapsed >= timeout_seconds:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=5)
+                    return {
+                        "stage": stage,
+                        "success": False,
+                        "error": f"Timed out after {timeout_seconds}s",
+                        "elapsed_seconds": round(elapsed, 1),
+                    }
+                time.sleep(_POLL_INTERVAL)
+        except Exception:
+            proc.kill()
+            proc.wait()
+            raise
+
+        elapsed = (datetime.now() - start_time).total_seconds()
+
+        stdout, stderr = "", ""
+        try:
+            out, err = proc.communicate(timeout=5)
+            stdout = out or ""
+            stderr = err or ""
+        except Exception:
+            pass
+
+        output_exists = os.path.isfile(poll_file)
+
+        return {
+            "stage": stage,
+            "success": output_exists,
+            "return_code": ret,
+            "output_file": poll_file if output_exists else None,
+            "output_exists": output_exists,
+            "elapsed_seconds": round(elapsed, 1),
+            "stdout": stdout[-2000:] if len(stdout) > 2000 else stdout,
+            "stderr": stderr[-2000:] if len(stderr) > 2000 else stderr,
+        }
+
+    except Exception as e:
+        logger.error(f"Error running ProDet {stage}: {e}")
+        return {"stage": stage, "error": str(e)}
+
+
+@tool
+def generate_planos_memorias(
+    project_name: str,
+    element_type: str = "vigas",
+    generate_dxf: bool = True,
+    generate_memorias: bool = True,
+    timeout_seconds: int = 600,
+) -> Dict[str, Any]:
+    """
+    Generate planos (DXF drawings) and/or memorias (PDF calculation reports)
+    for a project that has already been processed by ProDet core.
+
+    This runs ProDet's post-processing stages:
+      1. generador_dxf — converts intermediate planos JSONs into DXF files
+      2. memories_generator — converts intermediate graphics data into a PDF report
+
+    Prerequisites (generated by a prior run_prodet call):
+      - PLANOS/<ELEMENT_TYPE>/ folder with JSON files (for DXF generation)
+      - info_graficos_<element_type>.json (for memorias generation)
+
+    If the prerequisites are missing, the tool will re-run ProDet core in
+    full-completion mode (without early termination) to regenerate them.
+
+    Output files:
+      - DXF: PLANOS/planos_VIGAS.dxf or planos_NERVIOS.dxf
+      - Memorias: MEMORIAS/INFORME_vigas.pdf or INFORME_nervios.pdf
+
+    Args:
+        project_name: Name of the project folder inside PRODET_PROJECTS.
+        element_type: "vigas" or "nervios" (columnas not supported for planos).
+        generate_dxf: Whether to generate DXF drawings (default True).
+        generate_memorias: Whether to generate memorias PDF (default True).
+        timeout_seconds: Max time per stage (default 600s). Core re-run uses 900s.
+
+    Returns:
+        Dictionary with results for each stage, output file paths.
+    """
+    try:
+        if element_type not in ("vigas", "nervios"):
+            return {
+                "error": f"Planos/memorias generation only supports 'vigas' and "
+                         f"'nervios', got '{element_type}'."
+            }
+
+        project_path = os.path.join(PRODET_PROJECTS, project_name)
+        if not os.path.isdir(project_path):
+            return {"error": f"Project folder not found: {project_path}"}
+
+        # Check prerequisites
+        planos_folder = os.path.join(
+            project_path, "PLANOS", element_type.upper()
+        )
+        planos_jsons_exist = (
+            os.path.isdir(planos_folder)
+            and any(f.endswith(".json") for f in os.listdir(planos_folder))
+        )
+
+        info_graficos_path = os.path.join(
+            project_path, f"info_graficos_{element_type}.json"
+        )
+        info_graficos_exists = os.path.isfile(info_graficos_path)
+
+        result = {
+            "project_name": project_name,
+            "element_type": element_type,
+        }
+
+        # Re-run core if prerequisites are missing
+        needs_rerun = (
+            (generate_dxf and not planos_jsons_exist)
+            or (generate_memorias and not info_graficos_exists)
+        )
+        if needs_rerun:
+            missing = []
+            if generate_dxf and not planos_jsons_exist:
+                missing.append(f"PLANOS/{element_type.upper()}/ JSONs")
+            if generate_memorias and not info_graficos_exists:
+                missing.append(f"info_graficos_{element_type}.json")
+
+            logger.info(
+                f"Prerequisites missing ({', '.join(missing)}), "
+                f"re-running ProDet core with full completion."
+            )
+            core_result = _run_prodet_single(
+                project_path, element_type, 900,
+                wait_for_completion=True,
+            )
+            result["core_rerun"] = {
+                "reason": f"Missing prerequisites: {', '.join(missing)}",
+                "success": core_result.get("success", False),
+                "elapsed_seconds": core_result.get("elapsed_seconds"),
+            }
+            if not core_result.get("success"):
+                result["error"] = (
+                    "ProDet core re-run failed. Cannot generate planos/memorias "
+                    "without intermediate files."
+                )
+                result["core_detail"] = core_result
+                return result
+
+        # Stage 1: Generate DXF planos
+        if generate_dxf:
+            dxf_output = os.path.join(
+                project_path, "PLANOS", _DXF_OUTPUT_NAMES[element_type]
+            )
+            dxf_result = _run_prodet_postprocess(
+                project_path, element_type, "dxf",
+                timeout_seconds, dxf_output,
+            )
+            result["dxf"] = dxf_result
+
+        # Stage 2: Generate memorias PDF
+        if generate_memorias:
+            memorias_output = os.path.join(
+                project_path, "MEMORIAS", _MEMORIA_OUTPUT_NAMES[element_type]
+            )
+            memorias_result = _run_prodet_postprocess(
+                project_path, element_type, "memorias",
+                timeout_seconds, memorias_output,
+            )
+            result["memorias"] = memorias_result
+
+        # Overall success
+        dxf_ok = (not generate_dxf) or result.get("dxf", {}).get("success", False)
+        mem_ok = (not generate_memorias) or result.get("memorias", {}).get("success", False)
+        result["all_success"] = dxf_ok and mem_ok
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error generating planos/memorias: {e}")
         return {"error": str(e)}
 
 
@@ -1377,8 +1655,9 @@ You help users run ProDet (a reinforced concrete design tool) on project files a
 1. **List projects** to see what's available
 2. **Inspect a project** to verify input files are present
 3. **Run ProDet** to generate the reinforcement output (.xlsx)
-4. **Copy the output** to rc_agent's data directory
-5. **Run the data pipeline** to produce JSON artifacts for the other agents
+4. **Generate planos/memorias** (optional, on user request)
+5. **Copy the output** to rc_agent's data directory
+6. **Run the data pipeline** to produce JSON artifacts for the other agents
 
 == AVAILABLE TOOLS ==
 
@@ -1397,32 +1676,41 @@ You help users run ProDet (a reinforced concrete design tool) on project files a
    Runs can take several minutes. If the process times out but the output
    file was produced, it still counts as success.
 
-4. **copy_output_to_rc_agent** — Copy the ProDet output xlsx into rc_agent's
+4. **generate_planos_memorias** — Generate DXF drawings (planos) and/or PDF
+   calculation reports (memorias) for a project. Runs ProDet's post-processing
+   stages (generador_dxf and memories_generator). Requires a prior run_prodet
+   call; if intermediate files are missing, automatically re-runs core.
+   Supports vigas and nervios only.
+   Output:
+     - DXF: PLANOS/planos_VIGAS.dxf or planos_NERVIOS.dxf
+     - Memorias: MEMORIAS/INFORME_vigas.pdf or INFORME_nervios.pdf
+
+5. **copy_output_to_rc_agent** — Copy the ProDet output xlsx into rc_agent's
    projects/ folder. Specify element_type to pick the right file.
    Automatically backs up any existing file before overwriting.
 
-5. **run_data_pipeline** — Run the full rebar pipeline (reinforcement_parser ->
+6. **run_data_pipeline** — Run the full rebar pipeline (reinforcement_parser ->
    complexity_index -> productivity -> work_packages -> floor_schedule) to
    generate the 5 JSON artifacts used by the other agents.
 
-6. **run_parametric_study** — Batch tool: create multiple config variants
+7. **run_parametric_study** — Batch tool: create multiple config variants
    and run ProDet + pipeline for each. ONE tool call handles the entire loop.
    Pass variants_json as a JSON list of {suffix, changes} objects.
 
-7. **generate_structubim_json_tool** — Generate StructuBim JSON files for 3D
+8. **generate_structubim_json_tool** — Generate StructuBim JSON files for 3D
    visualization. Produces one file per element type (e.g. vigas.json,
    nervios.json) so they can be uploaded independently to structu-bim.com.
    Pass comma-separated project names and element types. Processes
    cantidades.json files (volumes, weights, bar types, complexity scores).
 
-8. **compose_solution** — Create a building solution by combining reinforcement
+9. **compose_solution** — Create a building solution by combining reinforcement
    from different element-type variants into a single project folder. After
    running parametric studies on vigas and nervios separately, use this tool
    to pick the best variant for each element type. The solution folder contains
    merged pipeline artifacts, so Procurement and Scheduling agents work with
    it directly as a normal project.
 
-9. **list_solutions** — List existing solution compositions for a project.
+10. **list_solutions** — List existing solution compositions for a project.
    Shows which variants were combined for each element type and when.
 
 == PARAMETRIC STUDY WORKFLOW ==
@@ -1502,11 +1790,15 @@ Always ask the user what they want to solve if not specified:
 
 == OUTPUT TYPES ==
 
-ProDet can generate different outputs (drawings, PDFs, Excel) depending on
-the gen_informe setting in the project's project.config file. This agent
-does not modify that setting — it runs ProDet with whatever config the
-project already has. If the user wants to change output types, they should
-edit project.config directly.
+ProDet generates outputs in three stages:
+  1. **Core** (run_prodet) — always runs, produces the Cantidades_Refuerzo xlsx
+  2. **DXF planos** (generate_planos_memorias) — optional, produces DXF drawing files
+  3. **Memorias PDF** (generate_planos_memorias) — optional, produces calculation reports
+
+By default, run_prodet only runs stage 1 (fast). When the user requests
+planos or memorias, use generate_planos_memorias to run stages 2 and/or 3.
+This tool handles prerequisites automatically — if intermediate files from
+stage 1 are missing, it re-runs core in full-completion mode.
 
 == USAGE GUIDELINES ==
 
@@ -1580,6 +1872,20 @@ For example, running ProDet for project "mokara" stores files in projects/mokara
 - If the user sets an active project with `/project <name>` in the CLI, those
   paths are injected automatically.
 
+== PROJECT FAMILIES ==
+
+Projects often have multiple variants sharing a base name (e.g. mokara, mokara_v1,
+mokara_v2, mokara_sol_balanced). When the user references a project by its base
+name (e.g. "mokara") and multiple related folders exist, use **list_project_family**
+to discover all variants. Then:
+- If the user's request applies to a single project (e.g. "run ProDet for mokara"),
+  use the exact folder they named.
+- If the user's request implies multiple projects (e.g. "what mokara projects do
+  we have?", "compare all mokara variants"), list all family members and either
+  apply the operation to all of them or ask the user which ones to include.
+- When listing projects, always group related variants together under their base
+  name so the user sees the family structure.
+
 == IMPORTANT ==
 
 - Use tools for all operations — don't try to run commands manually
@@ -1599,8 +1905,10 @@ For example, running ProDet for project "mokara" stores files in projects/mokara
         )
         self.tools = [
             list_projects,
+            list_project_family,
             inspect_project,
             run_prodet,
+            generate_planos_memorias,
             copy_output_to_rc_agent,
             run_data_pipeline,
             run_parametric_study,

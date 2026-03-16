@@ -59,7 +59,7 @@ reinforcement_solution.xlsx
 | Grouping Optimizer | `grouping_optimizer.py` | Estimate floor groupings, user selects, create config, run ProDet, compare results | `load_baseline_steel`, `estimate_groupings`, `apply_grouping`, `compare_grouping_results` |
 | Procurement | `procurement_agent.py` | Review reinforcement files, generate bar lists & PDF reports | `load_reinforcement_file`, `list_available_floors`, `get_floor_data`, `analyze_bars_by_diameter`, `analyze_bars_by_shape`, `generate_pdf_report` |
 | Scheduling | `scheduling_agent.py` | Plan rebar installation schedules | `compute_floor_schedule_tool`, `load_floor_schedule_tool` |
-| ProDet Runner | `prodet_agent.py` | Run ProDet, copy output, run data pipeline | `list_projects`, `inspect_project`, `run_prodet`, `copy_output_to_rc_agent`, `run_data_pipeline` |
+| ProDet Runner | `prodet_agent.py` | Run ProDet, copy output, run data pipeline, generate planos & memorias | `list_projects`, `inspect_project`, `run_prodet`, `generate_planos_memorias`, `copy_output_to_rc_agent`, `run_data_pipeline` |
 | Config Agent | `config_agent.py` | NL ↔ project.config translation — describe design intent, modify configs & set up floor groupings | `load_config_summary`, `update_config`, `set_floor_groups` |
 
 ### Unified Agent Pattern
@@ -146,6 +146,16 @@ The procurement agent parses multi-sheet Excel files with these key sheets:
 - `Resumen_Refuerzo` — story-by-story steel totals
 - `RefLong_PorElemento` / `RefLong_Total` — longitudinal reinforcement
 - `RefTrans_PorElemento` / `RefTrans_Total` — transverse reinforcement (stirrups)
+
+### Project Families
+
+Projects often produce multiple variant folders sharing a base name (e.g. `mokara`, `mokara_v1`, `mokara_lh50cm`, `mokara_sol_balanced`). The platform groups these into **project families** using `paths.py`:
+
+- `base_project_name(folder)` — extracts the base name by progressively stripping `_suffix` segments and checking for an existing source project folder with `project.config`. Falls back to regex for `_v\d+` and `_sol_*` patterns.
+- `list_project_families()` — groups all project folders by base name.
+- `resolve_project_family(name)` — returns all folders in the same family.
+
+All five agents have a `list_project_family` tool (defined in `prodet_agent.py`, imported by others). When a user references a project by base name (e.g. "mokara"), agents discover all variants and either operate on all of them or ask the user which ones to include.
 
 ### Data Flow
 

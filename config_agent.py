@@ -1001,6 +1001,17 @@ Top-level key `grupos_niveles` — array of group objects:
 ```
 **Do NOT modify grupos_niveles via `update_config`.** Always use the `set_floor_groups` tool.
 
+== PROJECT FAMILIES ==
+
+Projects often have multiple variants sharing a base name (e.g. mokara, mokara_v1,
+mokara_v2, mokara_sol_balanced). When the user references a project by its base
+name (e.g. "describe the mokara configs"), use **list_project_family** to discover
+all related variants. Then:
+- If the request is about a single config, use the exact folder named.
+- If the request implies multiple configs (e.g. "compare mokara configs" or
+  "what are the differences between the mokara variants"), list all family
+  members and load/compare their configs.
+
 == WHAT NOT TO MODIFY ==
 
 Never modify via update_config: lookup tables (lon_tras, Ld, Ldh_concreto, long_ganchos), standard libraries ("calibres", "materiales"), drawing config ("planos"), per-section/per-floor overrides (por_seccion, por_nivel), floor groups (use set_floor_groups instead).
@@ -1014,11 +1025,13 @@ Never modify via update_config: lookup tables (lon_tras, Ld, Ldh_concreto, long_
             temperature=temperature,
             max_tokens=4096,
         )
+        from prodet_agent import list_project_family
         self.tools = [
             load_config_summary,
             update_config,
             set_floor_groups,
             get_reference_material,
+            list_project_family,
         ]
         self.system_message = SystemMessage(
             content=self.SYSTEM_PROMPT,
