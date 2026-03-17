@@ -48,7 +48,7 @@ from paths import RC_AGENT_ROOT, RC_AGENT_PROJECTS, project_dir, normalize_path,
 from config_agent import (
     load_config_summary, update_config,
     _resolve_config_path, _get_nested, _set_nested,
-    _maybe_convert_calibre, _LONG_HOMOG_MAP,
+    _maybe_convert_calibre, _LONG_HOMOG_MAP, _write_config,
 )
 
 # =============================================================================
@@ -1149,8 +1149,7 @@ def _create_variant_config(
         variant_dir = project_dir(variant_name)
         variant_config_path = os.path.join(variant_dir, "project.config")
 
-        with open(variant_config_path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
+        _write_config(variant_config_path, config)
 
         # Copy companion files from source directory
         src_dir = os.path.dirname(source_config_path)

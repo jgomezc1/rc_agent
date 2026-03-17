@@ -43,6 +43,18 @@ logger = logging.getLogger(__name__)
 # Constants
 # =============================================================================
 
+def _write_config(path: str, config: dict) -> str:
+    """Write config to project.config (for local ProDet) and project.config.json (for cloud).
+
+    Returns the path of the .json copy.
+    """
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+    json_path = path + ".json"
+    shutil.copy2(path, json_path)
+    return json_path
+
+
 CALIBRE_NAMES = {
     0: '1/4"', 1: '3/8"', 2: '1/2"', 3: '5/8"',
     4: '3/4"', 5: '7/8"', 6: '1"', 7: '1-1/4"',
@@ -614,9 +626,8 @@ def update_config(
         else:
             resolved_output = resolved_input
 
-        # Write
-        with open(resolved_output, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
+        # Write project.config (local ProDet) + project.config.json (cloud)
+        json_path = _write_config(resolved_output, config)
 
         # Copy immutable companion files if output is in a different directory
         _COMPANION_FILES = ["project.cargas", "project.geom", "project.prodes"]
@@ -635,6 +646,7 @@ def update_config(
             "success": True,
             "changes_applied": applied,
             "output_path": resolved_output,
+            "json_path": json_path,
             "source_path": resolved_input,
         }
         if copied_files:
@@ -810,11 +822,10 @@ def set_floor_groups(
         else:
             resolved_output = resolved_input
 
-        # Write
+        # Write project.config (local ProDet) + project.config.json (cloud)
         out_dir = os.path.dirname(resolved_output)
         os.makedirs(out_dir, exist_ok=True)
-        with open(resolved_output, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
+        json_path = _write_config(resolved_output, config)
 
         # Copy immutable companion files if output is in a different directory
         _COMPANION_FILES = ["project.cargas", "project.geom", "project.prodes"]
@@ -835,6 +846,7 @@ def set_floor_groups(
             "total_grouped_floors": sum(len(g) for g in groups),
             "identical_range": all_floors[idx_start:idx_end + 1],
             "output_path": resolved_output,
+            "json_path": json_path,
             "source_path": resolved_input,
         }
         if copied_files:
