@@ -1,0 +1,1862 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "description": "ProDet Parameter Semantic Catalog — Maps every tunable configuration parameter to its functional cluster, valid range, archetype profiles, and qualitative construction impact. Designed to be loaded as agent context for the NL↔Config bidirectional translation system.",
+    "author": "RDC Consultores / ProDet Agent System",
+    "date": "2026-02-27",
+    "config_reference": "project.config (DMO_MOK / Ejemplo Mokara)",
+    "notes": {
+      "units": "All lengths in cm unless noted. Areas in cm². Weights in kg/m. Stresses in kg/cm².",
+      "bar_id_map": {
+        "0": "1/4\" (ø6.4mm)",
+        "1": "3/8\" (ø9.5mm)",
+        "2": "1/2\" (ø12.7mm)",
+        "3": "5/8\" (ø15.9mm)",
+        "4": "3/4\" (ø19.1mm)",
+        "5": "7/8\" (ø22.2mm)",
+        "6": "1\" (ø25.4mm)",
+        "7": "1-1/4\" (ø31.9mm)"
+      },
+      "element_types": ["vigas", "nervios", "columnas"],
+      "archetype_profiles": {
+        "simple": "Prioritizes construction simplicity, low error risk, low skill requirements. Accepts higher material cost.",
+        "balanced": "Middle ground between material efficiency and constructability.",
+        "optimized": "Prioritizes material savings and structural efficiency. Accepts higher complexity and skill demands."
+      }
+    }
+  },
+
+  "clusters": {
+    "A": {
+      "name": "Bar Complexity Envelope",
+      "description": "Controls the range and diversity of longitudinal bar diameters used in detailing. A narrow envelope produces homogeneous, easy-to-build solutions with fewer bar types on site. A wide envelope allows the optimizer to pick the best bar for each demand point, reducing steel weight but increasing the number of distinct bar types the crew must handle.",
+      "construction_dimensions_affected": ["piece_count", "field_error_risk", "installation_speed", "required_skill_level", "material_cost"],
+      "key_insight": "This is the single most impactful cluster for construction simplicity vs. material efficiency trade-off."
+    },
+    "B": {
+      "name": "Splice & Development Strategy",
+      "description": "Governs where and how bars are connected — lap splices, hooks, development lengths, and splice zone restrictions. Permissive splicing (splice anywhere, always splice) is simpler to coordinate but uses more steel. Restricted splicing (specific zones, no-splice regions) saves material but requires precise bar placement and more experienced crews.",
+      "construction_dimensions_affected": ["material_cost", "field_error_risk", "installation_speed", "required_skill_level", "inspection_complexity"],
+      "key_insight": "Splice strategy has cascading effects: restricted zones affect bar cutting schedules, delivery logistics, and field layout sequences."
+    },
+    "C": {
+      "name": "Stirrup Configuration",
+      "description": "Defines transverse reinforcement parameters — stirrup bar sizes, spacing limits, minimum quantities, confinement zones, and branch counts. More stirrup variability allows better shear optimization but significantly increases fabrication and placement complexity.",
+      "construction_dimensions_affected": ["material_cost", "piece_count", "field_error_risk", "installation_speed", "required_skill_level"],
+      "key_insight": "Stirrups are the most labor-intensive component of rebar installation. Simplifying stirrup configurations often yields the highest productivity gains on site."
+    },
+    "D": {
+      "name": "Geometric Tolerances & Bar Merging",
+      "description": "Controls how aggressively the detailing engine groups, merges, and homogenizes bars into common lengths and configurations. Higher tolerances mean more bars get unified into standard lengths (fewer distinct pieces) at the cost of some material excess. Lower tolerances preserve per-element optimization.",
+      "construction_dimensions_affected": ["material_cost", "piece_count", "installation_speed", "drawing_clarity", "field_error_risk"],
+      "key_insight": "tol_union and long_homog are the primary 'simplification knobs' — tol_union merges bars of similar length, and long_homog rounds cutting lengths to coarser increments. Both trade small amounts of steel for large reductions in piece diversity."
+    },
+    "E": {
+      "name": "Per-Level & Per-Section Overrides",
+      "description": "Controls whether parameters vary by floor level and/or cross-section geometry. When active, each floor or section type can have its own material grade, forced reinforcement, stirrup config, etc. This enables zone-optimized designs but multiplies the number of unique drawing configurations.",
+      "construction_dimensions_affected": ["material_cost", "piece_count", "drawing_clarity", "field_error_risk", "inspection_complexity", "adaptability"],
+      "key_insight": "Every active override multiplies the number of unique configurations the crew must learn and verify. Disabling overrides produces 'same pattern every floor' repetition, which is the single biggest driver of installation speed in high-rise construction."
+    },
+    "F": {
+      "name": "Drawing & Presentation",
+      "description": "Controls how shop drawings are organized, scaled, annotated, and laid out. Does not affect the steel itself but directly affects how well the construction crew can interpret and execute the design.",
+      "construction_dimensions_affected": ["drawing_clarity", "field_error_risk", "inspection_complexity"],
+      "key_insight": "Poor drawing organization is a hidden source of field errors. Clear, consistent drawing conventions reduce RFIs and rework."
+    },
+    "G": {
+      "name": "Code & Design Basis",
+      "description": "Fundamental code-mandated parameters: concrete covers, strain limits, seismic demand level, minimum reinforcement ratios. These are typically not negotiable for a given project — they are set by the structural design code (NSR-10) and the project's seismic classification. However, understanding them is essential for the agent to explain WHY certain detailing choices are constrained.",
+      "construction_dimensions_affected": ["material_cost", "required_skill_level"],
+      "key_insight": "These parameters set the 'floor' of complexity. A DES project inherently requires more confinement detailing than a DMO project, regardless of other parameter choices."
+    },
+    "H": {
+      "name": "Material Specification",
+      "description": "Concrete and steel material properties assigned to each element type, potentially varying by floor. Material choices affect development lengths, splice requirements, and confinement detailing.",
+      "construction_dimensions_affected": ["material_cost", "piece_count", "installation_speed"],
+      "key_insight": "Using fewer concrete grades across the building simplifies procurement and reduces the risk of placing the wrong concrete on a given floor."
+    }
+  },
+
+  "parameters": [
+
+    {
+      "id": "P-A01",
+      "path": "vigas.param_despiece.calibre_min",
+      "name": "Beam minimum bar size",
+      "name_es": "Calibre mínimo de refuerzo longitudinal en vigas",
+      "cluster": "A",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 0, "max": 7},
+      "unit": "bar_id",
+      "profiles": {
+        "simple":    {"value": 4, "rationale": "Start at 3/4\" — fewer small bars, easier to handle, reduces piece count"},
+        "balanced":  {"value": 3, "rationale": "5/8\" minimum — good balance of flexibility and simplicity"},
+        "optimized": {"value": 2, "rationale": "1/2\" minimum — allows finer-grained optimization, smaller bars where demand is low"}
+      },
+      "description": "The smallest bar diameter the detailing engine is allowed to select for beam longitudinal reinforcement. A higher minimum forces the use of larger (and fewer) bars, simplifying placement but potentially using more steel. A lower minimum allows more optimization but increases the number of distinct bar types.",
+      "construction_impact": {
+        "piece_count": "Higher min → fewer pieces (fewer small bars to handle)",
+        "material_cost": "Higher min → slightly more steel (over-reinforcing low-demand zones)",
+        "field_error_risk": "Higher min → lower risk (fewer bar types to confuse)",
+        "installation_speed": "Higher min → faster (fewer bars to place per element)",
+        "required_skill_level": "Higher min → lower skill needed"
+      },
+      "interactions": ["P-A02 (calibre_max)", "P-A03 (dif_max_cal)"],
+      "example_from_config": 3
+    },
+
+    {
+      "id": "P-A02",
+      "path": "vigas.param_despiece.calibre_max",
+      "name": "Beam maximum bar size",
+      "name_es": "Calibre máximo de refuerzo longitudinal en vigas",
+      "cluster": "A",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 0, "max": 7},
+      "unit": "bar_id",
+      "profiles": {
+        "simple":    {"value": 5, "rationale": "Cap at 7/8\" — avoids heavy bars that need mechanical aids"},
+        "balanced":  {"value": 6, "rationale": "Up to 1\" — standard practice for most beam sizes"},
+        "optimized": {"value": 7, "rationale": "Up to 1-1/4\" — maximum optimization, but bars are heavy and hard to bend"}
+      },
+      "description": "The largest bar diameter the detailing engine is allowed to select for beam longitudinal reinforcement. Larger bars require fewer pieces to meet demand but are heavier, harder to bend, and have longer development/splice lengths. Very large bars may also cause congestion at beam-column joints.",
+      "construction_impact": {
+        "piece_count": "Higher max → potentially fewer pieces (fewer large bars instead of many small ones)",
+        "material_cost": "Higher max → neutral to slightly less steel (better optimization headroom)",
+        "field_error_risk": "Higher max → mixed (fewer pieces but heavier handling)",
+        "installation_speed": "Higher max → slower per bar (weight) but fewer bars total",
+        "required_skill_level": "Higher max → higher (heavy bar bending and placement)"
+      },
+      "interactions": ["P-A01 (calibre_min)", "P-A03 (dif_max_cal)", "P-D06 (max_long_NE)"],
+      "example_from_config": 6
+    },
+
+    {
+      "id": "P-A03",
+      "path": "vigas.param_despiece.dif_max_cal",
+      "name": "Maximum bar size difference (beams)",
+      "name_es": "Diferencia máxima de calibre entre barras adyacentes en vigas",
+      "cluster": "A",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 1, "max": 6},
+      "unit": "bar_id_steps",
+      "profiles": {
+        "simple":    {"value": 1, "rationale": "Adjacent bars differ by at most one size — very uniform, easy to identify"},
+        "balanced":  {"value": 2, "rationale": "Two-step difference — reasonable diversity"},
+        "optimized": {"value": 3, "rationale": "Three-step difference — full optimization freedom, many bar types on site"}
+      },
+      "description": "Maximum allowed difference in bar size index between bars used together in the same element. A value of 1 means only adjacent sizes (e.g., 5/8\" and 3/4\") can coexist. A value of 3 allows mixing, say, 1/2\" with 1\" in the same beam. Lower values produce more uniform solutions; higher values allow more optimization.",
+      "construction_impact": {
+        "piece_count": "Lower → fewer distinct types, more uniform",
+        "material_cost": "Lower → slightly more steel (less optimization freedom)",
+        "field_error_risk": "Lower → significantly lower (bars look similar, hard to install wrong size)",
+        "installation_speed": "Lower → faster (less sorting, less decision-making)",
+        "required_skill_level": "Lower → lower"
+      },
+      "interactions": ["P-A01 (calibre_min)", "P-A02 (calibre_max)"],
+      "example_from_config": 3
+    },
+
+    {
+      "id": "P-A04",
+      "path": "vigas.param_despiece.dif_cal_unir_ppal",
+      "name": "Max bar size diff for merging principal bars",
+      "name_es": "Diferencia máxima de calibre para unir barras principales",
+      "cluster": "A",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 0, "max": 3},
+      "unit": "bar_id_steps",
+      "profiles": {
+        "simple":    {"value": 2, "rationale": "Aggressively merge nearby sizes into a single bar — fewer types"},
+        "balanced":  {"value": 1, "rationale": "Merge only adjacent sizes"},
+        "optimized": {"value": 0, "rationale": "No merging — each bar is exactly what's needed"}
+      },
+      "description": "When two adjacent spans have principal bars of similar but different diameters, this parameter controls whether they can be merged into a single continuous bar of the larger size. Higher values allow more aggressive merging, reducing piece count at the cost of some extra steel.",
+      "construction_impact": {
+        "piece_count": "Higher → fewer distinct bar groups",
+        "material_cost": "Higher → slightly more steel (upsizing smaller bars)",
+        "field_error_risk": "Higher → lower (fewer bar changes at supports)",
+        "installation_speed": "Higher → faster (continuous bars through supports)"
+      },
+      "interactions": ["P-A05 (dif_cal_unir_adic)", "P-D01 (tol_union)"],
+      "example_from_config": 1
+    },
+
+    {
+      "id": "P-A05",
+      "path": "vigas.param_despiece.dif_cal_unir_adic",
+      "name": "Max bar size diff for merging additional bars",
+      "name_es": "Diferencia máxima de calibre para unir barras adicionales",
+      "cluster": "A",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 0, "max": 3},
+      "unit": "bar_id_steps",
+      "profiles": {
+        "simple":    {"value": 2, "rationale": "Merge additional bars aggressively"},
+        "balanced":  {"value": 1, "rationale": "Standard one-step merging"},
+        "optimized": {"value": 0, "rationale": "No merging — exact bar sizing"}
+      },
+      "description": "Same concept as dif_cal_unir_ppal but for additional (non-principal) reinforcement bars. These are the bars that supplement the main reinforcement at high-demand locations.",
+      "construction_impact": {
+        "piece_count": "Higher → fewer distinct additional bar types",
+        "material_cost": "Higher → slightly more steel",
+        "field_error_risk": "Higher → lower",
+        "installation_speed": "Higher → faster"
+      },
+      "interactions": ["P-A04 (dif_cal_unir_ppal)"],
+      "example_from_config": 1
+    },
+
+    {
+      "id": "P-A06",
+      "path": "vigas.param_despiece.ref_primera_fila.opcion",
+      "name": "First-layer reinforcement strategy",
+      "name_es": "Estrategia de refuerzo en primera fila",
+      "cluster": "A",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 0, "max": 2},
+      "unit": "option_id",
+      "profiles": {
+        "simple":    {"value": 2, "rationale": "Option 2 with low cal_max_pf — constrains first layer to smaller bars, predictable layout"},
+        "balanced":  {"value": 2, "rationale": "Option 2 with moderate cal_max_pf"},
+        "optimized": {"value": 0, "rationale": "No constraint — optimizer decides freely"}
+      },
+      "description": "Controls how the first (bottom) layer of reinforcement is selected. Option 0 = free, Option 1 = constrained by calibre, Option 2 = constrained with a maximum bar size for the first layer (cal_max_pf). Constraining the first layer produces consistent patterns across beams.",
+      "construction_impact": {
+        "field_error_risk": "Constrained → lower (predictable first layer)",
+        "installation_speed": "Constrained → faster (crew knows what to expect)",
+        "material_cost": "Constrained → slightly higher"
+      },
+      "interactions": ["P-A07 (cal_max_pf)"],
+      "example_from_config": 2
+    },
+
+    {
+      "id": "P-A07",
+      "path": "vigas.param_despiece.ref_primera_fila.cal_max_pf",
+      "name": "Max bar size for first layer",
+      "name_es": "Calibre máximo para primera fila",
+      "cluster": "A",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 0, "max": 7},
+      "unit": "bar_id",
+      "profiles": {
+        "simple":    {"value": 4, "rationale": "3/4\" max in first layer — uniform, predictable"},
+        "balanced":  {"value": 5, "rationale": "7/8\" max — moderate flexibility"},
+        "optimized": {"value": 6, "rationale": "1\" max — nearly unconstrained"}
+      },
+      "description": "When ref_primera_fila.opcion = 2, this caps the bar size in the first layer. Smaller cap values push excess demand into additional bars or upper layers, creating a more uniform base layer.",
+      "construction_impact": {
+        "piece_count": "Lower cap → more bars in multiple layers",
+        "field_error_risk": "Lower cap → lower for base layer recognition",
+        "installation_speed": "Lower cap → mixed (uniform base but more layers)"
+      },
+      "interactions": ["P-A06 (ref_primera_fila.opcion)"],
+      "example_from_config": 4
+    },
+
+    {
+      "id": "P-A08",
+      "path": "vigas.calibre_ref_constr",
+      "name": "Constructive reinforcement bar size",
+      "name_es": "Calibre de refuerzo constructivo",
+      "cluster": "A",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 0, "max": 3},
+      "unit": "bar_id",
+      "profiles": {
+        "simple":    {"value": 1, "rationale": "3/8\" constructive rebar — standard, easy to handle"},
+        "balanced":  {"value": 0, "rationale": "1/4\" — lighter, cheaper"},
+        "optimized": {"value": 0, "rationale": "1/4\" — minimum material"}
+      },
+      "description": "Bar size used for constructive (non-structural) reinforcement — the bars placed purely for tying purposes or minimum code requirements where no structural demand exists.",
+      "construction_impact": {
+        "material_cost": "Higher → more steel for non-structural bars",
+        "installation_speed": "Higher → slightly easier to handle (stiffer bar)"
+      },
+      "interactions": [],
+      "example_from_config": 0
+    },
+
+    {
+      "id": "P-A09",
+      "path": "nervios.param_despiece.calibre_min",
+      "name": "Joist minimum bar size",
+      "name_es": "Calibre mínimo de refuerzo longitudinal en nervios",
+      "cluster": "A",
+      "element_type": "nervios",
+      "data_type": "integer",
+      "valid_range": {"min": 0, "max": 7},
+      "unit": "bar_id",
+      "profiles": {
+        "simple":    {"value": 2, "rationale": "1/2\" min — reduces piece types in joist system"},
+        "balanced":  {"value": 1, "rationale": "3/8\" — typical joist rebar"},
+        "optimized": {"value": 0, "rationale": "1/4\" — maximum savings in low-demand joists"}
+      },
+      "description": "Minimum bar diameter for joist longitudinal reinforcement. Joists typically use smaller bars than beams due to their smaller cross-sections and lower demands.",
+      "construction_impact": {
+        "piece_count": "Higher min → fewer types but potentially more bars per joist",
+        "material_cost": "Higher min → more steel in low-demand joists",
+        "field_error_risk": "Higher min → lower (fewer types)",
+        "installation_speed": "Higher min → faster (fewer types to sort)"
+      },
+      "interactions": ["P-A10 (nervios calibre_max)", "P-A11 (nervios dif_max_cal)"],
+      "example_from_config": 0
+    },
+
+    {
+      "id": "P-A10",
+      "path": "nervios.param_despiece.calibre_max",
+      "name": "Joist maximum bar size",
+      "name_es": "Calibre máximo de refuerzo longitudinal en nervios",
+      "cluster": "A",
+      "element_type": "nervios",
+      "data_type": "integer",
+      "valid_range": {"min": 0, "max": 7},
+      "unit": "bar_id",
+      "profiles": {
+        "simple":    {"value": 4, "rationale": "3/4\" max — avoids oversized bars in small joists"},
+        "balanced":  {"value": 5, "rationale": "7/8\" — reasonable headroom"},
+        "optimized": {"value": 6, "rationale": "1\" — full range for optimization"}
+      },
+      "description": "Maximum bar diameter for joist longitudinal reinforcement.",
+      "construction_impact": {
+        "piece_count": "Higher → potentially fewer pieces but may cause congestion in small sections",
+        "material_cost": "Higher → neutral to slightly less steel",
+        "field_error_risk": "Higher → risk of congestion in tight sections"
+      },
+      "interactions": ["P-A09 (nervios calibre_min)"],
+      "example_from_config": 6
+    },
+
+    {
+      "id": "P-A11",
+      "path": "nervios.param_despiece.dif_max_cal",
+      "name": "Maximum bar size difference (joists)",
+      "name_es": "Diferencia máxima de calibre en nervios",
+      "cluster": "A",
+      "element_type": "nervios",
+      "data_type": "integer",
+      "valid_range": {"min": 1, "max": 6},
+      "unit": "bar_id_steps",
+      "profiles": {
+        "simple":    {"value": 2, "rationale": "Low diversity in joist bars"},
+        "balanced":  {"value": 3, "rationale": "Moderate diversity"},
+        "optimized": {"value": 4, "rationale": "Full range for optimization"}
+      },
+      "description": "Maximum allowed bar size difference within a joist element. Same logic as for beams but applied to joist systems.",
+      "construction_impact": {
+        "piece_count": "Lower → more uniform bar population",
+        "field_error_risk": "Lower → much lower for joist systems (many repetitive elements)"
+      },
+      "interactions": ["P-A09", "P-A10"],
+      "example_from_config": 4
+    },
+
+    {
+      "id": "P-B01",
+      "path": "vigas.param_despiece.empalmar_siempre",
+      "name": "Always splice beams",
+      "name_es": "Empalmar siempre (vigas)",
+      "cluster": "B",
+      "element_type": "vigas",
+      "data_type": "boolean",
+      "valid_range": {"values": [true, false]},
+      "unit": null,
+      "profiles": {
+        "simple":    {"value": true, "rationale": "Always splice — standardized bar lengths, no continuous bars across multiple spans"},
+        "balanced":  {"value": true, "rationale": "Generally splice — simplifies logistics"},
+        "optimized": {"value": false, "rationale": "Allow continuous bars when efficient — saves splice material"}
+      },
+      "description": "When true, the detailing engine always creates lap splices at supports rather than running bars continuously through multiple spans. This standardizes bar lengths (each bar fits within max_long_NE) and simplifies cutting schedules. When false, the engine may run bars continuously if they fit within the max bar length, saving splice steel but requiring longer bars and more careful field coordination.",
+      "construction_impact": {
+        "material_cost": "true → more steel (lap splice material adds ~5-15% to total rebar weight depending on bar size and f'c)",
+        "piece_count": "true → more pieces (each span has its own bars)",
+        "field_error_risk": "true → lower (standardized bar lengths, clear span-by-span logic)",
+        "installation_speed": "true → faster for individual bars but more tying work at splices",
+        "required_skill_level": "true → lower (simpler bar scheduling)"
+      },
+      "interactions": ["P-B02 (zonas_empalme)", "P-B04 (factor_tras_cra)", "P-D06 (max_long_NE)"],
+      "example_from_config": true
+    },
+
+    {
+      "id": "P-B02",
+      "path": "vigas.param_despiece.zonas_empalme",
+      "name": "Splice zone restrictions (beams)",
+      "name_es": "Zonas de empalme permitidas (vigas)",
+      "cluster": "B",
+      "element_type": "vigas",
+      "data_type": "object",
+      "valid_range": {"I": ["todo", "centro", "apoyo"], "S": ["todo", "centro", "apoyo"]},
+      "unit": null,
+      "profiles": {
+        "simple":    {"value": {"I": "todo", "S": "todo"}, "rationale": "Splice anywhere — maximum flexibility for the crew"},
+        "balanced":  {"value": {"I": "centro", "S": "apoyo"}, "rationale": "Bottom bars splice at midspan, top at supports — code-preferred locations"},
+        "optimized": {"value": {"I": "centro", "S": "centro"}, "rationale": "Restricted to midspan zones — minimum splice lengths (lower demand zones)"}
+      },
+      "description": "Defines WHERE along the beam span lap splices are permitted for bottom (I=inferior) and top (S=superior) reinforcement. 'todo' = anywhere, 'centro' = midspan region, 'apoyo' = near supports. The code (NSR-10/ACI 318) prefers splices in low-stress zones. Restricting splice zones reduces splice lengths (Class A vs Class B splices) but requires more precise bar cutting and placement.",
+      "construction_impact": {
+        "material_cost": "Restricted → less splice steel (shorter lap lengths in low-stress zones)",
+        "field_error_risk": "Restricted → higher (crew must position splice exactly in the allowed zone)",
+        "installation_speed": "Restricted → slower (more positioning care needed)",
+        "required_skill_level": "Restricted → higher (must understand zone constraints)",
+        "inspection_complexity": "Restricted → higher (inspector must verify splice locations)"
+      },
+      "interactions": ["P-B01 (empalmar_siempre)", "P-B04 (factor_tras_cra)"],
+      "example_from_config": {"I": "todo", "S": "todo"}
+    },
+
+    {
+      "id": "P-B03",
+      "path": "vigas.param_despiece.forzar_traslapo_GG",
+      "name": "Force large-bar lap splices",
+      "name_es": "Forzar traslapo en barras de gran diámetro",
+      "cluster": "B",
+      "element_type": "vigas",
+      "data_type": "boolean",
+      "valid_range": {"values": [true, false]},
+      "unit": null,
+      "profiles": {
+        "simple":    {"value": false, "rationale": "Don't force — let engine decide between lap and hooks"},
+        "balanced":  {"value": false, "rationale": "Default behavior"},
+        "optimized": {"value": true, "rationale": "Force laps for large bars — avoids expensive hooks on large diameters"}
+      },
+      "description": "When true, forces the use of lap splices even for large-diameter bars (where hooks might otherwise be preferred). Large-bar lap splices are very long but avoid the need for pre-bent hooks, which are expensive and hard to handle for bars ≥ 1\".",
+      "construction_impact": {
+        "material_cost": "true → more steel (long laps) but avoids hook fabrication costs",
+        "installation_speed": "true → mixed (simpler bars but longer overlaps to tie)",
+        "field_error_risk": "true → lower (straight bars, no hook geometry to verify)"
+      },
+      "interactions": ["P-B05 (cabezas_ganchos)"],
+      "example_from_config": false
+    },
+
+    {
+      "id": "P-B04",
+      "path": "vigas.param_despiece.factor_tras_cra",
+      "name": "Splice length increase factor (confinement)",
+      "name_es": "Factor de incremento de traslapo en zona de confinamiento",
+      "cluster": "B",
+      "element_type": "vigas",
+      "data_type": "float",
+      "valid_range": {"min": 1.0, "max": 2.0},
+      "unit": "multiplier",
+      "profiles": {
+        "simple":    {"value": 1.3, "rationale": "Standard 1.3 code factor"},
+        "balanced":  {"value": 1.3, "rationale": "Standard code factor"},
+        "optimized": {"value": 1.0, "rationale": "No increase — only if code allows (careful: may not be code-compliant for DMO+)"}
+      },
+      "description": "Multiplier applied to lap splice lengths when the splice falls within a confinement zone (plastic hinge region). NSR-10 requires 1.3× for DMO elements. This parameter directly increases bar lengths in critical zones.",
+      "construction_impact": {
+        "material_cost": "Higher → more steel at confinement zones",
+        "field_error_risk": "Code-mandated, not negotiable for compliance"
+      },
+      "interactions": ["P-B02 (zonas_empalme)", "P-G01 (demanda)"],
+      "example_from_config": 1.3
+    },
+
+    {
+      "id": "P-B05",
+      "path": "vigas.param_despiece.cabezas_ganchos",
+      "name": "Use hooked heads at bar terminations",
+      "name_es": "Usar cabezas con ganchos en terminaciones",
+      "cluster": "B",
+      "element_type": "vigas",
+      "data_type": "boolean",
+      "valid_range": {"values": [true, false]},
+      "unit": null,
+      "profiles": {
+        "simple":    {"value": true, "rationale": "Standard practice — hooks at terminations"},
+        "balanced":  {"value": true, "rationale": "Standard practice"},
+        "optimized": {"value": true, "rationale": "Hooks reduce development length, saving bar extension"}
+      },
+      "description": "When true, bar terminations use standard hooks (90° or 180°) to achieve development within shorter distances. This is standard practice for most beam reinforcement and is usually code-required at exterior joints.",
+      "construction_impact": {
+        "material_cost": "true → slightly less steel (shorter development via hook)",
+        "installation_speed": "true → slower (pre-bent hooks must be oriented correctly)",
+        "field_error_risk": "true → slightly higher (hook orientation matters)"
+      },
+      "interactions": ["P-B03 (forzar_traslapo_GG)"],
+      "example_from_config": true
+    },
+
+    {
+      "id": "P-B06",
+      "path": "vigas.param_despiece.gan_vola",
+      "name": "Cantilever hook configuration",
+      "name_es": "Ganchos en voladizo",
+      "cluster": "B",
+      "element_type": "vigas",
+      "data_type": "object",
+      "valid_range": {"S": [0, 1], "I": [0, 1]},
+      "unit": "flag",
+      "profiles": {
+        "simple":    {"value": {"S": 1, "I": 1}, "rationale": "Hooks on both faces at cantilevers — safe, clear"},
+        "balanced":  {"value": {"S": 1, "I": 0}, "rationale": "Hook on top only (standard for cantilevers)"},
+        "optimized": {"value": {"S": 1, "I": 0}, "rationale": "Minimum hooks needed"}
+      },
+      "description": "Controls whether hooks are placed at cantilever free ends for top (S=superior) and bottom (I=inferior) reinforcement. Top hooks at cantilevers are standard; bottom hooks may be added for constructive integrity.",
+      "construction_impact": {
+        "material_cost": "More hooks → slightly more steel",
+        "field_error_risk": "Explicit hooks → lower (clear termination point)"
+      },
+      "interactions": [],
+      "example_from_config": {"S": 1, "I": 0}
+    },
+
+    {
+      "id": "P-B07",
+      "path": "vigas.param_despiece.barra_alta",
+      "name": "Top bar development length factor",
+      "name_es": "Factor de longitud de desarrollo para barra alta",
+      "cluster": "B",
+      "element_type": "vigas",
+      "data_type": "object",
+      "valid_range": {"castigo": [0, 1], "factor": {"min": 1.0, "max": 2.0}},
+      "unit": "flag + multiplier",
+      "profiles": {
+        "simple":    {"value": {"castigo": 1, "factor": 1.3}, "rationale": "Standard 1.3 top-bar factor per code"},
+        "balanced":  {"value": {"castigo": 1, "factor": 1.3}, "rationale": "Code-required"},
+        "optimized": {"value": {"castigo": 1, "factor": 1.3}, "rationale": "Code-required — not adjustable"}
+      },
+      "description": "ACI 318 / NSR-10 require a 1.3× increase in development length for 'top bars' (bars with more than 300mm of fresh concrete below them during casting). The 'castigo' flag enables/disables this penalty; 'factor' sets the multiplier. This is code-mandated and generally not negotiable.",
+      "construction_impact": {
+        "material_cost": "Code-mandated — increases top bar lengths by ~30%",
+        "field_error_risk": "N/A — fixed by code"
+      },
+      "interactions": [],
+      "example_from_config": {"castigo": 1, "factor": 1.3}
+    },
+
+    {
+      "id": "P-B08",
+      "path": "vigas.dif_cal_refcont",
+      "name": "Max caliber diff for continuous reinforcement",
+      "name_es": "Diferencia de calibre para refuerzo continuo",
+      "cluster": "B",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 0, "max": 3},
+      "unit": "bar_id_steps",
+      "profiles": {
+        "simple":    {"value": 2, "rationale": "Allow wider merging of continuous bars"},
+        "balanced":  {"value": 1, "rationale": "Standard one-step difference"},
+        "optimized": {"value": 0, "rationale": "No merging — exact sizing"}
+      },
+      "description": "Controls the maximum bar size difference allowed when extending continuous reinforcement across spans. Higher values allow more aggressive grouping of continuous bars.",
+      "construction_impact": {
+        "piece_count": "Higher → fewer continuous bar changes",
+        "material_cost": "Higher → slightly more steel (upsizing)",
+        "installation_speed": "Higher → faster (fewer bar transitions)"
+      },
+      "interactions": ["P-A04 (dif_cal_unir_ppal)"],
+      "example_from_config": 1
+    },
+
+    {
+      "id": "P-C01",
+      "path": "vigas.estribos.n_estribos_min",
+      "name": "Minimum number of stirrups per span (beams)",
+      "name_es": "Número mínimo de estribos por tramo en vigas",
+      "cluster": "C",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 3, "max": 20},
+      "unit": "count",
+      "profiles": {
+        "simple":    {"value": 5, "rationale": "Standard minimum — ensures adequate coverage"},
+        "balanced":  {"value": 5, "rationale": "Standard minimum"},
+        "optimized": {"value": 3, "rationale": "Code minimum only"}
+      },
+      "description": "Absolute minimum number of stirrups placed in any beam span regardless of shear demand. Higher values ensure better crack control and bar support even where shear demand is low.",
+      "construction_impact": {
+        "material_cost": "Higher → more stirrup steel",
+        "installation_speed": "Higher → more ties, slower",
+        "field_error_risk": "Higher → lower (more regular pattern)"
+      },
+      "interactions": ["P-C04 (sep_min)"],
+      "example_from_config": 5
+    },
+
+    {
+      "id": "P-C02",
+      "path": "vigas.estribos.ramas_minimas_globales",
+      "name": "Minimum stirrup legs (beams)",
+      "name_es": "Ramas mínimas globales de estribos en vigas",
+      "cluster": "C",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 1, "max": 6},
+      "unit": "count",
+      "profiles": {
+        "simple":    {"value": 2, "rationale": "Standard 2-leg stirrups everywhere — uniform shape, easy to fabricate"},
+        "balanced":  {"value": 2, "rationale": "Standard practice"},
+        "optimized": {"value": 2, "rationale": "2 is the code minimum for beams per NSR-10"}
+      },
+      "description": "Minimum number of vertical legs per stirrup set across the beam width. 2 = standard closed stirrup. Higher values indicate multi-leg configurations (e.g., 4-leg for wide beams). For beams, 2 is the standard minimum; the engine may add more legs for wide sections.",
+      "construction_impact": {
+        "material_cost": "Higher → more stirrup steel",
+        "installation_speed": "Higher → significantly slower (multi-leg stirrups are harder to fabricate and place)",
+        "required_skill_level": "Higher → higher (complex stirrup shapes)"
+      },
+      "interactions": [],
+      "example_from_config": 2
+    },
+
+    {
+      "id": "P-C03",
+      "path": "vigas.estribos.calibre_est_ext_min",
+      "name": "External stirrup min bar size (beams)",
+      "name_es": "Calibre mínimo de estribo externo en vigas",
+      "cluster": "C",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 0, "max": 3},
+      "unit": "bar_id",
+      "profiles": {
+        "simple":    {"value": 1, "rationale": "3/8\" minimum — standard, easy to bend"},
+        "balanced":  {"value": 1, "rationale": "3/8\" standard"},
+        "optimized": {"value": 0, "rationale": "1/4\" where code allows — less steel"}
+      },
+      "description": "Minimum bar diameter for the external (perimeter) stirrups in beams. The code typically requires 3/8\" minimum for seismic beams (DMO/DES).",
+      "construction_impact": {
+        "material_cost": "Higher → more stirrup steel",
+        "installation_speed": "Uniform size → faster fabrication"
+      },
+      "interactions": ["P-C03b (calibre_est_ext_max)", "P-C03c (calibre_est_int_min)", "P-C03d (calibre_est_int_max)"],
+      "example_from_config": 1
+    },
+
+    {
+      "id": "P-C03b",
+      "path": "vigas.estribos.calibre_est_ext_max",
+      "name": "External stirrup max bar size (beams)",
+      "name_es": "Calibre máximo de estribo externo en vigas",
+      "cluster": "C",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 0, "max": 4},
+      "unit": "bar_id",
+      "profiles": {
+        "simple":    {"value": 1, "rationale": "Force single size (3/8\") for all external stirrups — maximum uniformity"},
+        "balanced":  {"value": 2, "rationale": "Allow up to 1/2\" for high-shear zones"},
+        "optimized": {"value": 2, "rationale": "Allow optimizer to pick best size"}
+      },
+      "description": "Maximum bar diameter for external stirrups. Setting min = max forces a single stirrup size, which is simpler for fabrication. Allowing a range lets the engine optimize per zone.",
+      "construction_impact": {
+        "piece_count": "Narrow range → fewer stirrup types",
+        "material_cost": "Narrow range → slightly more steel (oversized in low-demand zones)",
+        "installation_speed": "Single size → much faster fabrication"
+      },
+      "interactions": ["P-C03"],
+      "example_from_config": 2
+    },
+
+    {
+      "id": "P-C03c",
+      "path": "vigas.estribos.calibre_est_int_min",
+      "name": "Internal stirrup min bar size (beams)",
+      "name_es": "Calibre mínimo de estribo interno en vigas",
+      "cluster": "C",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 0, "max": 3},
+      "unit": "bar_id",
+      "profiles": {
+        "simple":    {"value": 1, "rationale": "Same as external — uniform fabrication"},
+        "balanced":  {"value": 1, "rationale": "3/8\" minimum"},
+        "optimized": {"value": 0, "rationale": "1/4\" — lighter internal ties where allowed"}
+      },
+      "description": "Minimum bar diameter for internal stirrups (crossties/internal legs) in beams. Internal stirrups provide confinement and support interior longitudinal bars.",
+      "construction_impact": {
+        "material_cost": "Higher → more stirrup steel",
+        "installation_speed": "Same as external → simplifies if matched"
+      },
+      "interactions": ["P-C03d"],
+      "example_from_config": 1
+    },
+
+    {
+      "id": "P-C03d",
+      "path": "vigas.estribos.calibre_est_int_max",
+      "name": "Internal stirrup max bar size (beams)",
+      "name_es": "Calibre máximo de estribo interno en vigas",
+      "cluster": "C",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 0, "max": 4},
+      "unit": "bar_id",
+      "profiles": {
+        "simple":    {"value": 1, "rationale": "Single size for internal stirrups"},
+        "balanced":  {"value": 2, "rationale": "Allow up to 1/2\""},
+        "optimized": {"value": 2, "rationale": "Full range"}
+      },
+      "description": "Maximum bar diameter for internal stirrups in beams.",
+      "construction_impact": {
+        "piece_count": "Narrow range → fewer types",
+        "material_cost": "Narrow range → slightly more steel"
+      },
+      "interactions": ["P-C03c"],
+      "example_from_config": 2
+    },
+
+    {
+      "id": "P-C04",
+      "path": "vigas.estribos.sep_min",
+      "name": "Minimum stirrup spacing (beams)",
+      "name_es": "Separación mínima de estribos en vigas",
+      "cluster": "C",
+      "element_type": "vigas",
+      "data_type": "float",
+      "valid_range": {"min": 5, "max": 25},
+      "unit": "cm",
+      "profiles": {
+        "simple":    {"value": 10, "rationale": "Standard 10cm minimum — prevents excessive congestion"},
+        "balanced":  {"value": 10, "rationale": "Standard"},
+        "optimized": {"value": 7.5, "rationale": "Tighter minimum allows better shear optimization in critical zones"}
+      },
+      "description": "Absolute minimum center-to-center spacing between stirrups. Prevents the engine from specifying impractically tight stirrup spacing that would make concrete placement difficult.",
+      "construction_impact": {
+        "material_cost": "Lower min → more stirrups possible → more steel",
+        "installation_speed": "Lower min → slower (more stirrups to place and tie)",
+        "field_error_risk": "Lower min → higher (tight spacing is hard to achieve consistently)"
+      },
+      "interactions": ["P-C01 (n_estribos_min)", "P-C05 (sep_apoyo)"],
+      "example_from_config": 10
+    },
+
+    {
+      "id": "P-C05",
+      "path": "vigas.estribos.sep_apoyo",
+      "name": "First stirrup distance from support face",
+      "name_es": "Separación del primer estribo a la cara del apoyo",
+      "cluster": "C",
+      "element_type": "vigas",
+      "data_type": "float",
+      "valid_range": {"min": 2, "max": 10},
+      "unit": "cm",
+      "profiles": {
+        "simple":    {"value": 5, "rationale": "Standard 5cm — universally applied"},
+        "balanced":  {"value": 5, "rationale": "Standard"},
+        "optimized": {"value": 5, "rationale": "Code-driven, typically 5cm or d/4"}
+      },
+      "description": "Distance from the face of the support (column or wall) to the first stirrup. Code typically requires the first stirrup within 5cm (2\") of the support face in seismic zones.",
+      "construction_impact": {
+        "field_error_risk": "Standard value reduces ambiguity in placement"
+      },
+      "interactions": [],
+      "example_from_config": 5
+    },
+
+    {
+      "id": "P-C06",
+      "path": "vigas.estribos.resis_min",
+      "name": "Minimum shear resistance ratio",
+      "name_es": "Resistencia mínima al cortante (ratio)",
+      "cluster": "C",
+      "element_type": "vigas",
+      "data_type": "float",
+      "valid_range": {"min": 0.3, "max": 1.0},
+      "unit": "ratio",
+      "profiles": {
+        "simple":    {"value": 0.5, "rationale": "Standard 50% minimum — adequate safety margin"},
+        "balanced":  {"value": 0.5, "rationale": "Standard"},
+        "optimized": {"value": 0.5, "rationale": "Code-driven minimum"}
+      },
+      "description": "Minimum ratio of stirrup shear resistance to demand. The engine ensures that stirrup configuration provides at least this fraction of the required shear capacity.",
+      "construction_impact": {
+        "material_cost": "Higher → more stirrup steel in low-demand zones"
+      },
+      "interactions": [],
+      "example_from_config": 0.5
+    },
+
+    {
+      "id": "P-C07",
+      "path": "vigas.estribos.soporte_zonas_conf",
+      "name": "Confinement zone support (beams)",
+      "name_es": "Soporte de zonas de confinamiento en estribos de vigas",
+      "cluster": "C",
+      "element_type": "vigas",
+      "data_type": "object",
+      "valid_range": {"opcion": [0, 1, 2], "separacion": {"min": 0.05, "max": 0.30}},
+      "unit": "option + m",
+      "profiles": {
+        "simple":    {"value": {"opcion": 0, "separacion": 0.15}, "rationale": "Disabled — simpler stirrup schedule"},
+        "balanced":  {"value": {"opcion": 1, "separacion": 0.15}, "rationale": "Active with 15cm standard spacing"},
+        "optimized": {"value": {"opcion": 2, "separacion": 0.10}, "rationale": "Full confinement optimization"}
+      },
+      "description": "Controls how confinement zones (plastic hinge regions) are handled in the stirrup layout. Option 0 = no special treatment (engine uses standard code rules), Option 1 = explicit confinement zones with specified spacing, Option 2 = advanced confinement with variable spacing.",
+      "construction_impact": {
+        "material_cost": "Higher options → more stirrup steel in confinement zones",
+        "field_error_risk": "Higher options → more complex stirrup schedule",
+        "required_skill_level": "Higher options → crew must understand zone transitions"
+      },
+      "interactions": ["P-G01 (demanda)"],
+      "example_from_config": {"opcion": 0, "separacion": 0.15}
+    },
+
+    {
+      "id": "P-D01",
+      "path": "vigas.param_despiece.tol_union",
+      "name": "Bar merging tolerance (beams)",
+      "name_es": "Tolerancia de unión de barras en vigas",
+      "cluster": "D",
+      "element_type": "vigas",
+      "data_type": "object",
+      "valid_range": {"S": {"min": 0, "max": 2.0}, "I": {"min": 0, "max": 2.0}},
+      "unit": "m",
+      "profiles": {
+        "simple":    {"value": {"S": 0.5, "I": 1.5}, "rationale": "High tolerance — aggressively merge bars into common lengths"},
+        "balanced":  {"value": {"S": 0.3, "I": 1.0}, "rationale": "Moderate merging"},
+        "optimized": {"value": {"S": 0.1, "I": 0.3}, "rationale": "Low tolerance — each bar cut to exact need"}
+      },
+      "description": "When two bars in adjacent spans have similar but not identical lengths, this tolerance (in meters) determines whether they can be unified into a single common length. 'S' (superior/top) and 'I' (inferior/bottom) have separate tolerances because top bars are typically more variable. Higher tolerance → more merging → fewer distinct bar lengths on the cutting schedule → simpler logistics but more wasted steel.",
+      "construction_impact": {
+        "piece_count": "Higher → significantly fewer distinct bar lengths",
+        "material_cost": "Higher → more steel (bars extended beyond structural need)",
+        "field_error_risk": "Higher → much lower (fewer bar types to confuse)",
+        "installation_speed": "Higher → faster (less sorting, less measuring)",
+        "drawing_clarity": "Higher → cleaner drawings (fewer bar annotations)"
+      },
+      "interactions": ["P-A04 (dif_cal_unir_ppal)", "P-D02 (long_homog)"],
+      "example_from_config": {"S": 0.3, "I": 1.0}
+    },
+
+    {
+      "id": "P-D02",
+      "path": "vigas.param_despiece.long_homog",
+      "name": "Bar cutting length rounding increment",
+      "name_es": "Incremento de redondeo para longitudes de corte de barras",
+      "cluster": "D",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"values": [0, 1, 2]},
+      "unit": "option_id",
+      "value_map": {
+        "0": "Round bar cutting lengths to multiples of 10 cm (0.10 m). Finest granularity — produces bars like 1.10m, 1.20m, 1.30m, etc. Least waste per bar but most distinct bar lengths on the cutting schedule.",
+        "1": "Round bar cutting lengths to multiples of 50 cm (0.50 m). Standard practice — produces bars like 1.50m, 2.00m, 2.50m, etc. Good balance of waste and standardization.",
+        "2": "Round bar cutting lengths to multiples of 100 cm (1.00 m). Coarsest rounding — produces bars like 2.00m, 3.00m, 4.00m, etc. Maximum standardization, fewest distinct lengths, most waste per bar."
+      },
+      "profiles": {
+        "simple":    {"value": 2, "rationale": "Round to 1.00m — fewest distinct bar lengths on the cutting schedule, maximum standardization, fastest sorting and identification on site"},
+        "balanced":  {"value": 1, "rationale": "Round to 0.50m — standard Colombian practice, good balance of waste and piece diversity"},
+        "optimized": {"value": 0, "rationale": "Round to 0.10m — minimum waste per bar, but many distinct cutting lengths on the schedule"}
+      },
+      "description": "Controls the rounding increment for rebar cutting lengths. When the detailing engine computes the required bar length, it rounds UP to the nearest multiple of the selected increment. Value 0 = 10cm multiples, 1 = 50cm multiples, 2 = 100cm multiples. Higher values produce fewer distinct bar lengths (simplifying the cutting schedule and site logistics) at the cost of more wasted steel per bar (each bar is extended to the next rounding boundary).",
+      "construction_impact": {
+        "piece_count": "Higher (coarser rounding) → significantly fewer distinct bar lengths on the cutting schedule",
+        "material_cost": "Higher → more steel waste per bar (rounding up to next increment boundary)",
+        "field_error_risk": "Higher → lower (fewer distinct lengths to confuse)",
+        "installation_speed": "Higher → faster (fewer bar types to sort and identify)"
+      },
+      "interactions": ["P-D01 (tol_union)", "P-D06 (max_long_NE)"],
+      "example_from_config": 1
+    },
+
+    {
+      "id": "P-D03",
+      "path": "vigas.param_despiece.maxva",
+      "name": "Maximum variants to evaluate",
+      "name_es": "Máximo de variantes a evaluar",
+      "cluster": "D",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 1, "max": 50},
+      "unit": "count",
+      "profiles": {
+        "simple":    {"value": 6, "rationale": "Fewer variants — faster processing, simpler results"},
+        "balanced":  {"value": 12, "rationale": "Standard search depth"},
+        "optimized": {"value": 24, "rationale": "Deep search for optimal combination"}
+      },
+      "description": "Maximum number of bar arrangement variants the detailing engine evaluates per section before selecting the best one. More variants = potentially better optimization but longer computation. The engine explores combinations of bar sizes and counts within the allowed range.",
+      "construction_impact": {
+        "material_cost": "Higher → potentially less steel (better optimization found)",
+        "piece_count": "Higher → may produce more diverse solutions"
+      },
+      "interactions": ["P-A01 through P-A03 (bar range defines the search space)"],
+      "example_from_config": 12
+    },
+
+    {
+      "id": "P-D04",
+      "path": "vigas.param_despiece.text_capas",
+      "name": "Maximum text layers in drawings",
+      "name_es": "Máximo de capas de texto en planos",
+      "cluster": "D",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 2, "max": 6},
+      "unit": "count",
+      "profiles": {
+        "simple":    {"value": 3, "rationale": "Limit annotation complexity — cleaner drawings"},
+        "balanced":  {"value": 3, "rationale": "Standard"},
+        "optimized": {"value": 4, "rationale": "More annotation space for complex sections"}
+      },
+      "description": "Maximum number of text annotation layers in beam cross-section drawings. Limits how many reinforcement layers can be annotated before the drawing becomes too cluttered.",
+      "construction_impact": {
+        "drawing_clarity": "Lower → cleaner but may omit detail",
+        "field_error_risk": "Lower → paradoxically higher if information is omitted"
+      },
+      "interactions": [],
+      "example_from_config": 3
+    },
+
+    {
+      "id": "P-D05",
+      "path": "vigas.param_despiece.tras_conf",
+      "name": "Confinement zone splice length",
+      "name_es": "Longitud de traslapo en zona de confinamiento",
+      "cluster": "D",
+      "element_type": "vigas",
+      "data_type": "float",
+      "valid_range": {"min": 30, "max": 120},
+      "unit": "cm",
+      "profiles": {
+        "simple":    {"value": 60, "rationale": "Standard 60cm — safe general value"},
+        "balanced":  {"value": 60, "rationale": "Standard"},
+        "optimized": {"value": 45, "rationale": "Reduced where code allows (depends on bar size and f'c)"}
+      },
+      "description": "Default splice length to use within confinement zones. This provides a quick reference value; the engine may override with the computed splice length from the lon_tras tables if larger.",
+      "construction_impact": {
+        "material_cost": "Higher → more steel at splice locations",
+        "field_error_risk": "Standard value → lower (crew memorizes one splice length for confined zones)"
+      },
+      "interactions": ["P-B04 (factor_tras_cra)"],
+      "example_from_config": 60
+    },
+
+    {
+      "id": "P-D06",
+      "path": "vigas.param_despiece.max_long_NE",
+      "name": "Maximum unspliced bar length",
+      "name_es": "Longitud máxima de barra no empalmada",
+      "cluster": "D",
+      "element_type": "vigas",
+      "data_type": "float",
+      "valid_range": {"min": 6.0, "max": 14.0},
+      "unit": "m",
+      "profiles": {
+        "simple":    {"value": 9.0, "rationale": "Short bars — easier to handle, transport, and store on site"},
+        "balanced":  {"value": 10.5, "rationale": "Standard Colombian commercial rebar length (10.5m)"},
+        "optimized": {"value": 12.0, "rationale": "Longer bars — fewer splices, less material, but harder to handle"}
+      },
+      "description": "Maximum physical length of a single bar before it must be spliced. Tied to commercial rebar lengths available in the market. In Colombia, standard bars are 6m, 9m, or 10.5m (some suppliers offer 12m). Longer bars reduce splice count and material but require longer trucks, larger storage areas, and more manpower to lift and position.",
+      "construction_impact": {
+        "material_cost": "Longer → less splice steel",
+        "piece_count": "Longer → fewer pieces",
+        "field_error_risk": "Longer → mixed (fewer splices but heavier bars to position)",
+        "installation_speed": "Longer → mixed (fewer splices but harder to maneuver in tight spaces)",
+        "required_skill_level": "Longer → higher (heavy bar handling)",
+        "adaptability": "Longer → lower (harder to adjust if site conditions change)"
+      },
+      "interactions": ["P-B01 (empalmar_siempre)"],
+      "example_from_config": 10.5
+    },
+
+    {
+      "id": "P-D07",
+      "path": "vigas.param_despiece.ganch_medios",
+      "name": "Allow mid-span hooks",
+      "name_es": "Ganchos en el centro del tramo",
+      "cluster": "D",
+      "element_type": "vigas",
+      "data_type": "boolean",
+      "valid_range": {"values": [true, false]},
+      "unit": null,
+      "profiles": {
+        "simple":    {"value": false, "rationale": "No mid-span hooks — simpler bar schedule"},
+        "balanced":  {"value": false, "rationale": "Standard"},
+        "optimized": {"value": true, "rationale": "Allow hooks where they reduce material"}
+      },
+      "description": "When true, the engine can terminate bars with hooks at midspan locations (not just at supports). This provides more detailing flexibility but adds hook fabrication and placement complexity.",
+      "construction_impact": {
+        "material_cost": "true → potentially less steel (shorter bar extensions)",
+        "field_error_risk": "true → higher (hook placement at midspan is unusual)",
+        "required_skill_level": "true → higher"
+      },
+      "interactions": ["P-B05 (cabezas_ganchos)"],
+      "example_from_config": false
+    },
+
+    {
+      "id": "P-D08",
+      "path": "vigas.param_despiece.ppal_2_lineas",
+      "name": "Principal bars in two layers",
+      "name_es": "Refuerzo principal en dos líneas",
+      "cluster": "D",
+      "element_type": "vigas",
+      "data_type": "boolean",
+      "valid_range": {"values": [true, false]},
+      "unit": null,
+      "profiles": {
+        "simple":    {"value": false, "rationale": "Single layer preferred — simpler section layout"},
+        "balanced":  {"value": false, "rationale": "Standard single layer"},
+        "optimized": {"value": true, "rationale": "Allow two layers — may optimize for narrow beams with high demand"}
+      },
+      "description": "When true, allows the principal (main) reinforcement to be split across two layers. This is useful for narrow beams with high moment demand where all bars can't fit in one row. When false, the engine tries to keep all principal bars in the first layer.",
+      "construction_impact": {
+        "material_cost": "true → mixed (second layer reduces effective depth slightly)",
+        "installation_speed": "true → slower (two-layer placement)",
+        "field_error_risk": "true → higher (layer position must be precise)"
+      },
+      "interactions": ["P-A06 (ref_primera_fila)", "P-A07 (cal_max_pf)"],
+      "example_from_config": false
+    },
+
+    {
+      "id": "P-D09",
+      "path": "vigas.lim_max_barras_capa",
+      "name": "Limit maximum bars per layer",
+      "name_es": "Limitar máximo de barras por capa",
+      "cluster": "D",
+      "element_type": "vigas",
+      "data_type": "boolean",
+      "valid_range": {"values": [true, false]},
+      "unit": null,
+      "profiles": {
+        "simple":    {"value": true, "rationale": "Enforce limits — prevents overcrowded sections"},
+        "balanced":  {"value": false, "rationale": "Let engine decide based on available width"},
+        "optimized": {"value": false, "rationale": "No limit — full optimization"}
+      },
+      "description": "When true, enforces a maximum number of bars per layer (defined in max_barras_capa per section width). Prevents the engine from overcrowding sections, which would make placement and concrete consolidation difficult.",
+      "construction_impact": {
+        "field_error_risk": "true → lower (guaranteed spacing)",
+        "installation_speed": "true → faster (less congestion)",
+        "material_cost": "true → may increase (forces overflow to upper layers or larger bars)"
+      },
+      "interactions": ["P-D08 (ppal_2_lineas)"],
+      "example_from_config": false
+    },
+
+    {
+      "id": "P-D10",
+      "path": "vigas.param_despiece.new_cal_max_on_error",
+      "name": "Auto-increase bar size on error",
+      "name_es": "Aumentar calibre máximo automáticamente ante error",
+      "cluster": "D",
+      "element_type": "vigas",
+      "data_type": "boolean",
+      "valid_range": {"values": [true, false]},
+      "unit": null,
+      "profiles": {
+        "simple":    {"value": true, "rationale": "Auto-resolve — avoids manual intervention"},
+        "balanced":  {"value": true, "rationale": "Standard"},
+        "optimized": {"value": false, "rationale": "Manual review preferred — engineer makes deliberate choice"}
+      },
+      "description": "When the detailing engine can't fit the required reinforcement within the allowed bar size range, this flag lets it automatically increase the maximum bar size (up to calibre_max_on_error) to find a solution. When false, the engine reports an error for manual review.",
+      "construction_impact": {
+        "field_error_risk": "true → introduces unexpected bar sizes → higher risk",
+        "drawing_clarity": "true → may produce non-uniform drawings"
+      },
+      "interactions": ["P-A02 (calibre_max)", "P-D10b (calibre_max_on_error)"],
+      "example_from_config": false
+    },
+
+    {
+      "id": "P-D10b",
+      "path": "vigas.param_despiece.calibre_max_on_error",
+      "name": "Bar size cap for auto-error resolution",
+      "name_es": "Calibre máximo para resolución automática de errores",
+      "cluster": "D",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 4, "max": 7},
+      "unit": "bar_id",
+      "profiles": {
+        "simple":    {"value": 6, "rationale": "Cap at 1\" — safe upper limit"},
+        "balanced":  {"value": 7, "rationale": "Allow up to 1-1/4\""},
+        "optimized": {"value": 8, "rationale": "Maximum flexibility to resolve"}
+      },
+      "description": "When new_cal_max_on_error is active, this caps how far the engine can increase the bar size. Prevents runaway upsizing.",
+      "construction_impact": {
+        "field_error_risk": "Higher cap → potentially unexpected large bars"
+      },
+      "interactions": ["P-D10 (new_cal_max_on_error)"],
+      "example_from_config": 8
+    },
+
+    {
+      "id": "P-D11",
+      "path": "vigas.param_despiece.redi_mom",
+      "name": "Moment redistribution",
+      "name_es": "Redistribución de momentos",
+      "cluster": "D",
+      "element_type": "vigas",
+      "data_type": "boolean",
+      "valid_range": {"values": [true, false]},
+      "unit": null,
+      "profiles": {
+        "simple":    {"value": false, "rationale": "No redistribution — conservative, straightforward"},
+        "balanced":  {"value": false, "rationale": "Standard"},
+        "optimized": {"value": true, "rationale": "Redistribute up to val_redi — can significantly reduce peak reinforcement"}
+      },
+      "description": "When true, allows moment redistribution from supports to midspan (up to val_redi percentage). This can reduce peak reinforcement at supports, which is where congestion is worst, but requires adequate ductility and is only permitted by code for certain conditions.",
+      "construction_impact": {
+        "material_cost": "true → potentially less steel at supports",
+        "field_error_risk": "true → mixed (less congestion but different drawings from standard analysis)",
+        "installation_speed": "true → potentially faster (less congestion at beam-column joints)"
+      },
+      "interactions": ["P-D11b (val_redi)"],
+      "example_from_config": false
+    },
+
+    {
+      "id": "P-E01",
+      "path": "vigas.param_despiece.forzar_ref_ppal.filtro_por_nivel",
+      "name": "Enable per-level forced reinforcement (beams)",
+      "name_es": "Activar refuerzo forzado por nivel en vigas",
+      "cluster": "E",
+      "element_type": "vigas",
+      "data_type": "boolean",
+      "valid_range": {"values": [true, false]},
+      "unit": null,
+      "profiles": {
+        "simple":    {"value": false, "rationale": "Disabled — same reinforcement rules for all floors"},
+        "balanced":  {"value": false, "rationale": "Disabled unless specific floors need different treatment"},
+        "optimized": {"value": true, "rationale": "Active — different reinforcement per floor for maximum optimization"}
+      },
+      "description": "When true, the forced principal reinforcement settings can vary by floor level. This allows the engineer to specify different minimum bars per floor (e.g., heavier reinforcement on lower floors, lighter on upper floors). When false, a single default applies everywhere.",
+      "construction_impact": {
+        "piece_count": "true → many more bar configurations across the building",
+        "material_cost": "true → less steel (optimized per zone)",
+        "field_error_risk": "true → significantly higher (crew must read different drawings per floor)",
+        "installation_speed": "true → slower (learning curve per floor, less repetition)",
+        "inspection_complexity": "true → much higher"
+      },
+      "interactions": ["P-E02 (forzar_ref_ppal per-section)"],
+      "example_from_config": false
+    },
+
+    {
+      "id": "P-E02",
+      "path": "vigas.param_despiece.forzar_ref_ppal.por_seccion",
+      "name": "Per-section forced reinforcement (beams)",
+      "name_es": "Refuerzo forzado por sección en vigas",
+      "cluster": "E",
+      "element_type": "vigas",
+      "data_type": "object_map",
+      "valid_range": "Keys are 'b,h' section dimensions in meters; values are {valor: bool, calibre: bar_id, cantidad: count}",
+      "unit": "mixed",
+      "profiles": {
+        "simple":    {"value": "all disabled", "rationale": "No per-section overrides — uniform treatment"},
+        "balanced":  {"value": "selectively enabled for critical sections", "rationale": "Override only where engineer deems necessary"},
+        "optimized": {"value": "extensively configured per section type", "rationale": "Fine-tuned per cross-section"}
+      },
+      "description": "Allows forcing a specific minimum principal reinforcement (bar size and count) for each unique beam cross-section geometry (width × height). The keys are 'b,h' pairs in meters. When valor=true for a section, the engine must provide at least the specified bars regardless of structural demand.",
+      "construction_impact": {
+        "piece_count": "Active overrides → more standardized per section type (can reduce or increase depending on settings)",
+        "material_cost": "Can force more steel than needed or ensure minimum constructive amounts",
+        "field_error_risk": "Active → mixed (clearer minimum but more rules to remember)"
+      },
+      "interactions": ["P-E01 (filtro_por_nivel)"],
+      "example_from_config": "All sections disabled (valor: false)"
+    },
+
+    {
+      "id": "P-E03",
+      "path": "vigas.materiales.fc.filtro_por_nivel",
+      "name": "Enable per-level concrete strength (beams)",
+      "name_es": "Activar f'c por nivel en vigas",
+      "cluster": "E",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"values": [0, 1]},
+      "unit": "flag",
+      "profiles": {
+        "simple":    {"value": 0, "rationale": "Single f'c for all beam floors — simplest concrete procurement"},
+        "balanced":  {"value": 0, "rationale": "Uniform unless project demands otherwise"},
+        "optimized": {"value": 1, "rationale": "Variable f'c by floor — higher grades on lower floors, lower grades on upper floors"}
+      },
+      "description": "When active (1), beam concrete strength can vary by floor level. This is common in tall buildings where lower floors may use 350 or 420 kg/cm² while upper floors use 210. When inactive (0), the default f'c applies to all floors.",
+      "construction_impact": {
+        "material_cost": "Active → optimized concrete cost, but also affects rebar (higher f'c = shorter development lengths = less steel)",
+        "field_error_risk": "Active → higher (wrong concrete grade on wrong floor is a critical and costly error)",
+        "installation_speed": "Active → neutral for rebar, but adds QC coordination for concrete placement"
+      },
+      "interactions": ["P-H01 (vigas.materiales.fc.default)"],
+      "example_from_config": 0
+    },
+
+    {
+      "id": "P-E04",
+      "path": "columnas.materiales.fc.filtro_por_nivel",
+      "name": "Enable per-level concrete strength (columns)",
+      "name_es": "Activar f'c por nivel en columnas",
+      "cluster": "E",
+      "element_type": "columnas",
+      "data_type": "boolean",
+      "valid_range": {"values": [true, false]},
+      "unit": "flag",
+      "profiles": {
+        "simple":    {"value": false, "rationale": "Uniform column concrete"},
+        "balanced":  {"value": true, "rationale": "Typically active for tall buildings — column concrete often varies by zone"},
+        "optimized": {"value": true, "rationale": "Active — allows concrete grade transitions"}
+      },
+      "description": "When true, column concrete strength varies by floor. Very common in tall buildings where lower-floor columns need higher concrete grades. Affects development lengths, splice requirements, and overall column design.",
+      "construction_impact": {
+        "material_cost": "Active → optimized concrete and rebar costs",
+        "field_error_risk": "Active → higher (concrete placement coordination critical)",
+        "inspection_complexity": "Active → higher (must verify correct concrete at each floor)"
+      },
+      "interactions": [],
+      "example_from_config": true
+    },
+
+    {
+      "id": "P-E05",
+      "path": "vigas.estribos.est_min.filtro_por_nivel",
+      "name": "Enable per-level minimum stirrups (beams)",
+      "name_es": "Activar estribos mínimos por nivel en vigas",
+      "cluster": "E",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"values": [0, 1]},
+      "unit": "flag",
+      "profiles": {
+        "simple":    {"value": 0, "rationale": "Uniform stirrup minimums everywhere"},
+        "balanced":  {"value": 0, "rationale": "Standard"},
+        "optimized": {"value": 1, "rationale": "Variable per floor — reduce stirrups on low-demand upper floors"}
+      },
+      "description": "When active, minimum stirrup configurations can vary by floor level. Allows lighter stirrups on upper floors with lower seismic demands.",
+      "construction_impact": {
+        "material_cost": "Active → less stirrup steel on low-demand floors",
+        "field_error_risk": "Active → higher (different stirrup patterns per floor)",
+        "installation_speed": "Active → slower (less repetition)"
+      },
+      "interactions": ["P-C01", "P-C04"],
+      "example_from_config": 0
+    },
+
+    {
+      "id": "P-F01",
+      "path": "vigas.planos.tipo_diagramacion",
+      "name": "Drawing organization mode",
+      "name_es": "Tipo de diagramación de planos",
+      "cluster": "F",
+      "element_type": "vigas",
+      "data_type": "string",
+      "valid_range": {"values": ["por_piso", "por_viga", "por_eje"]},
+      "unit": null,
+      "profiles": {
+        "simple":    {"value": "por_piso", "rationale": "By floor — crew works floor by floor, sees all beams per level"},
+        "balanced":  {"value": "por_piso", "rationale": "Standard organization"},
+        "optimized": {"value": "por_viga", "rationale": "By beam — useful for prefabrication or specialized crews"}
+      },
+      "description": "How shop drawings are organized: 'por_piso' groups all beams on a floor into one or more sheets, 'por_viga' creates individual sheets per beam, 'por_eje' groups by structural axis. The choice affects how the field crew navigates the drawing set.",
+      "construction_impact": {
+        "drawing_clarity": "por_piso → best for floor-by-floor construction (most common in Colombia)",
+        "field_error_risk": "por_piso → lower (crew sees spatial context of beam relationships)",
+        "installation_speed": "por_piso → faster lookup for typical high-rise construction"
+      },
+      "interactions": [],
+      "example_from_config": "por_piso"
+    },
+
+    {
+      "id": "P-F02",
+      "path": "vigas.planos.escala_esquema",
+      "name": "Elevation schematic scale",
+      "name_es": "Escala del esquema en elevación",
+      "cluster": "F",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 100, "max": 500},
+      "unit": "scale_denominator",
+      "profiles": {
+        "simple":    {"value": 200, "rationale": "Larger scale (1:200) — more detail visible, fewer beams per sheet"},
+        "balanced":  {"value": 300, "rationale": "Standard 1:300"},
+        "optimized": {"value": 400, "rationale": "Smaller scale — more beams per sheet, fewer total sheets"}
+      },
+      "description": "Drawing scale denominator for beam elevation schematics. 1:300 means 1cm on paper = 300cm real. Larger denominators fit more beams per sheet but make details smaller and harder to read.",
+      "construction_impact": {
+        "drawing_clarity": "Lower denominator → larger drawings → easier to read",
+        "field_error_risk": "Lower denominator → lower (details more visible)"
+      },
+      "interactions": ["P-F03 (escala_seccion)"],
+      "example_from_config": 300
+    },
+
+    {
+      "id": "P-F03",
+      "path": "vigas.planos.escala_seccion",
+      "name": "Cross-section scale",
+      "name_es": "Escala de secciones transversales",
+      "cluster": "F",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"min": 100, "max": 500},
+      "unit": "scale_denominator",
+      "profiles": {
+        "simple":    {"value": 200, "rationale": "Larger cross-sections — easier to count bars and read sizes"},
+        "balanced":  {"value": 300, "rationale": "Standard 1:300"},
+        "optimized": {"value": 300, "rationale": "Standard — sections are already small"}
+      },
+      "description": "Drawing scale denominator for beam cross-section details.",
+      "construction_impact": {
+        "drawing_clarity": "Lower denominator → easier to read bar arrangements in sections"
+      },
+      "interactions": ["P-F02 (escala_esquema)"],
+      "example_from_config": 300
+    },
+
+    {
+      "id": "P-F04",
+      "path": "vigas.planos.size",
+      "name": "Drawing sheet size",
+      "name_es": "Tamaño de hoja de plano",
+      "cluster": "F",
+      "element_type": "vigas",
+      "data_type": "object",
+      "valid_range": {"ancho": [42, 84, 100], "alto": [30, 43, 60]},
+      "unit": "cm",
+      "profiles": {
+        "simple":    {"value": {"ancho": 56.7, "alto": 43}, "rationale": "Standard format — fits common plotters"},
+        "balanced":  {"value": {"ancho": 56.7, "alto": 43}, "rationale": "Standard"},
+        "optimized": {"value": {"ancho": 84, "alto": 60}, "rationale": "Larger sheets — more info per page, fewer total sheets"}
+      },
+      "description": "Physical dimensions of the drawing sheet in centimeters.",
+      "construction_impact": {
+        "drawing_clarity": "Larger sheets → more information visible at once",
+        "field_error_risk": "Standard sizes → compatible with site equipment"
+      },
+      "interactions": [],
+      "example_from_config": {"ancho": 56.7, "alto": 43}
+    },
+
+    {
+      "id": "P-F05",
+      "path": "vigas.planos.rotular_planos",
+      "name": "Auto-number drawings",
+      "name_es": "Rotular planos automáticamente",
+      "cluster": "F",
+      "element_type": "vigas",
+      "data_type": "boolean",
+      "valid_range": {"values": [true, false]},
+      "unit": null,
+      "profiles": {
+        "simple":    {"value": true, "rationale": "Auto-number for consistency"},
+        "balanced":  {"value": false, "rationale": "Manual numbering for project-specific conventions"},
+        "optimized": {"value": true, "rationale": "Automated for efficiency"}
+      },
+      "description": "When true, ProDet automatically assigns sequential drawing numbers following the prefix/suffix naming convention.",
+      "construction_impact": {
+        "drawing_clarity": "Consistent numbering aids document control"
+      },
+      "interactions": ["P-F06 (prefijo_planos)", "P-F07 (sufijo_nombre_planos)"],
+      "example_from_config": false
+    },
+
+    {
+      "id": "P-F06",
+      "path": "vigas.planos.apoyos_con_hatch",
+      "name": "Support hatching style",
+      "name_es": "Estilo de achurado en apoyos",
+      "cluster": "F",
+      "element_type": "vigas",
+      "data_type": "string",
+      "valid_range": {"values": ["C", "X", "N"]},
+      "unit": null,
+      "profiles": {
+        "simple":    {"value": "C", "rationale": "Concrete hatch — standard, clear support identification"},
+        "balanced":  {"value": "C", "rationale": "Standard"},
+        "optimized": {"value": "C", "rationale": "Standard"}
+      },
+      "description": "Visual representation of support (column/wall) zones in beam elevation drawings. 'C' = concrete hatch pattern, 'X' = cross pattern, 'N' = none.",
+      "construction_impact": {
+        "drawing_clarity": "Clear hatching helps crew identify support boundaries"
+      },
+      "interactions": [],
+      "example_from_config": "C"
+    },
+
+    {
+      "id": "P-G01",
+      "path": "vigas.norma.demanda",
+      "name": "Seismic demand level",
+      "name_es": "Nivel de demanda sísmica (capacidad de disipación de energía)",
+      "cluster": "G",
+      "element_type": "global",
+      "data_type": "string",
+      "valid_range": {"values": ["DMI", "DMO", "DES"]},
+      "unit": null,
+      "profiles": {
+        "simple":    {"value": "project-specific", "rationale": "NOT adjustable — set by seismic zone and building classification"},
+        "balanced":  {"value": "project-specific", "rationale": "NOT adjustable"},
+        "optimized": {"value": "project-specific", "rationale": "NOT adjustable"}
+      },
+      "description": "Colombian seismic design category: DMI (Mínima/Low), DMO (Moderada/Moderate), DES (Especial/Special). This fundamentally affects confinement requirements, splice restrictions, minimum reinforcement, and stirrup detailing. DMO is typical for intermediate seismic zones; DES applies to high seismic zones or essential buildings.",
+      "construction_impact": {
+        "material_cost": "DES > DMO > DMI (more confinement = more steel)",
+        "required_skill_level": "DES requires experienced crews (complex confinement zones)",
+        "field_error_risk": "DES has tighter tolerances and more failure modes to check",
+        "inspection_complexity": "DES >> DMO >> DMI"
+      },
+      "interactions": ["P-B04 (factor_tras_cra)", "P-C07 (soporte_zonas_conf)", "All stirrup and splice parameters"],
+      "example_from_config": "DMO"
+    },
+
+    {
+      "id": "P-G02",
+      "path": "vigas.norma.rec_traccion",
+      "name": "Concrete cover — tension face (beams)",
+      "name_es": "Recubrimiento en cara de tracción (vigas)",
+      "cluster": "G",
+      "element_type": "vigas",
+      "data_type": "float",
+      "valid_range": {"min": 2, "max": 7},
+      "unit": "cm",
+      "profiles": {
+        "simple":    {"value": 4, "rationale": "Standard 4cm — code minimum for beams in normal exposure"},
+        "balanced":  {"value": 4, "rationale": "Standard"},
+        "optimized": {"value": 4, "rationale": "Code-determined, not adjustable for optimization"}
+      },
+      "description": "Clear concrete cover from the extreme tension fiber to the nearest rebar surface. Set by NSR-10 based on exposure conditions and element type. Affects effective depth and therefore reinforcement quantities.",
+      "construction_impact": {
+        "field_error_risk": "Standard cover → spacer blocks set to known dimension",
+        "material_cost": "Higher cover → less effective depth → slightly more steel needed"
+      },
+      "interactions": ["P-G03 (rec_compresion)", "P-G04 (rec_lat)"],
+      "example_from_config": 4
+    },
+
+    {
+      "id": "P-G03",
+      "path": "vigas.norma.rec_compresion",
+      "name": "Concrete cover — compression face (beams)",
+      "name_es": "Recubrimiento en cara de compresión (vigas)",
+      "cluster": "G",
+      "element_type": "vigas",
+      "data_type": "float",
+      "valid_range": {"min": 2, "max": 7},
+      "unit": "cm",
+      "profiles": {
+        "simple":    {"value": 4, "rationale": "Standard"},
+        "balanced":  {"value": 4, "rationale": "Standard"},
+        "optimized": {"value": 4, "rationale": "Code-determined"}
+      },
+      "description": "Clear concrete cover on the compression face.",
+      "construction_impact": {
+        "field_error_risk": "Standard dimension aids spacer placement"
+      },
+      "interactions": ["P-G02"],
+      "example_from_config": 4
+    },
+
+    {
+      "id": "P-G04",
+      "path": "vigas.norma.rec_lat",
+      "name": "Concrete cover — lateral face (beams)",
+      "name_es": "Recubrimiento lateral (vigas)",
+      "cluster": "G",
+      "element_type": "vigas",
+      "data_type": "float",
+      "valid_range": {"min": 2, "max": 7},
+      "unit": "cm",
+      "profiles": {
+        "simple":    {"value": 4, "rationale": "Standard"},
+        "balanced":  {"value": 4, "rationale": "Standard"},
+        "optimized": {"value": 4, "rationale": "Code-determined"}
+      },
+      "description": "Clear concrete cover on lateral (side) faces of beams.",
+      "construction_impact": {
+        "field_error_risk": "Affects stirrup sizing and available width for longitudinal bars"
+      },
+      "interactions": ["P-G02", "P-G03"],
+      "example_from_config": 4
+    },
+
+    {
+      "id": "P-G05",
+      "path": "vigas.norma.centroide_as",
+      "name": "Assumed steel centroid depth (beams)",
+      "name_es": "Centroide del acero de refuerzo asumido (vigas)",
+      "cluster": "G",
+      "element_type": "vigas",
+      "data_type": "float",
+      "valid_range": {"min": 4, "max": 10},
+      "unit": "cm",
+      "profiles": {
+        "simple":    {"value": 6, "rationale": "Conservative — accounts for multiple layers"},
+        "balanced":  {"value": 6, "rationale": "Standard assumption"},
+        "optimized": {"value": 5, "rationale": "Tighter assumption for single-layer designs"}
+      },
+      "description": "Assumed distance from the extreme fiber to the centroid of the tension steel. Used in the initial design iteration. If the actual centroid differs significantly, the engine iterates. A larger value is more conservative (assumes deeper steel, less effective moment arm).",
+      "construction_impact": {
+        "material_cost": "Higher → slightly more conservative steel quantities"
+      },
+      "interactions": ["P-D08 (ppal_2_lineas)"],
+      "example_from_config": 6
+    },
+
+    {
+      "id": "P-G06",
+      "path": "vigas.norma.ec_max",
+      "name": "Maximum concrete strain at ultimate",
+      "name_es": "Deformación máxima del concreto",
+      "cluster": "G",
+      "element_type": "vigas",
+      "data_type": "float",
+      "valid_range": {"min": 0.003, "max": 0.003},
+      "unit": "dimensionless",
+      "profiles": {
+        "simple":    {"value": 0.003, "rationale": "Code value — not adjustable"},
+        "balanced":  {"value": 0.003, "rationale": "Code value"},
+        "optimized": {"value": 0.003, "rationale": "Code value"}
+      },
+      "description": "Whitney stress block assumption for maximum concrete crushing strain. Fixed at 0.003 by ACI 318 / NSR-10.",
+      "construction_impact": {
+        "material_cost": "Fixed — determines section capacity calculations"
+      },
+      "interactions": ["P-G07 (es_min)"],
+      "example_from_config": 0.003
+    },
+
+    {
+      "id": "P-G07",
+      "path": "vigas.norma.es_min",
+      "name": "Minimum steel strain (tension-controlled check)",
+      "name_es": "Deformación mínima del acero (control por tracción)",
+      "cluster": "G",
+      "element_type": "vigas",
+      "data_type": "float",
+      "valid_range": {"min": 0.004, "max": 0.005},
+      "unit": "dimensionless",
+      "profiles": {
+        "simple":    {"value": 0.005, "rationale": "Code value — not adjustable"},
+        "balanced":  {"value": 0.005, "rationale": "Code value"},
+        "optimized": {"value": 0.005, "rationale": "Code value"}
+      },
+      "description": "Minimum steel strain at ultimate to classify as tension-controlled (φ=0.9). ACI 318 requires εs ≥ 0.005 for tension-controlled design.",
+      "construction_impact": {
+        "material_cost": "Fixed — limits how much steel can be placed (prevents over-reinforcing)"
+      },
+      "interactions": ["P-G06 (ec_max)"],
+      "example_from_config": 0.005
+    },
+
+    {
+      "id": "P-G08",
+      "path": "vigas.norma.sep_bar",
+      "name": "Minimum bar spacing (beams)",
+      "name_es": "Separación mínima entre barras en vigas",
+      "cluster": "G",
+      "element_type": "vigas",
+      "data_type": "float",
+      "valid_range": {"min": 2.5, "max": 8},
+      "unit": "cm",
+      "profiles": {
+        "simple":    {"value": 4.5, "rationale": "Standard — ensures concrete flow around bars"},
+        "balanced":  {"value": 4.5, "rationale": "Standard"},
+        "optimized": {"value": 3.5, "rationale": "Tighter — allows more bars per layer (risky for concrete consolidation)"}
+      },
+      "description": "Minimum clear spacing between adjacent longitudinal bars. Code requires at least db, 25mm, or 4/3×max_aggregate_size (whichever governs). This affects how many bars can fit in a single layer.",
+      "construction_impact": {
+        "field_error_risk": "Tighter spacing → harder to achieve → higher error risk",
+        "installation_speed": "Tighter spacing → harder to vibrate concrete → slower placing"
+      },
+      "interactions": ["P-G09 (sep_lin)"],
+      "example_from_config": 4.5
+    },
+
+    {
+      "id": "P-G09",
+      "path": "vigas.norma.sep_lin",
+      "name": "Minimum layer spacing (beams)",
+      "name_es": "Separación mínima entre líneas (capas) en vigas",
+      "cluster": "G",
+      "element_type": "vigas",
+      "data_type": "float",
+      "valid_range": {"min": 2.5, "max": 5},
+      "unit": "cm",
+      "profiles": {
+        "simple":    {"value": 3, "rationale": "Standard layer spacing"},
+        "balanced":  {"value": 3, "rationale": "Standard"},
+        "optimized": {"value": 2.5, "rationale": "Minimum — allows tighter multi-layer arrangements"}
+      },
+      "description": "Minimum clear vertical spacing between reinforcement layers. Affects centroid position and how many layers can fit in the section depth.",
+      "construction_impact": {
+        "field_error_risk": "Tighter → harder to maintain precise spacing",
+        "installation_speed": "Tighter → more care needed during placement"
+      },
+      "interactions": ["P-G08 (sep_bar)"],
+      "example_from_config": 3
+    },
+
+    {
+      "id": "P-H01",
+      "path": "vigas.materiales.fc.default",
+      "name": "Default concrete strength (beams)",
+      "name_es": "Resistencia del concreto por defecto (vigas)",
+      "cluster": "H",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"values": [210, 280, 350, 420, 490, 560]},
+      "unit": "kg/cm²",
+      "profiles": {
+        "simple":    {"value": 210, "rationale": "Standard for residential/commercial — widely available, lowest cost"},
+        "balanced":  {"value": 280, "rationale": "Higher grade — shorter development lengths, less steel"},
+        "optimized": {"value": 350, "rationale": "Premium grade — significantly shorter development/splice lengths"}
+      },
+      "description": "Default concrete compressive strength for beams. Higher f'c reduces development and splice lengths (less steel) but increases concrete cost. The trade-off depends on local concrete vs. steel pricing.",
+      "construction_impact": {
+        "material_cost": "Higher f'c → more expensive concrete but less steel → net effect depends on market",
+        "field_error_risk": "Higher f'c → shorter splices → slightly easier to fit",
+        "installation_speed": "Higher f'c → neutral (same placement, just different mix)"
+      },
+      "interactions": ["P-E03 (filtro_por_nivel for beams)"],
+      "example_from_config": 210
+    },
+
+    {
+      "id": "P-H02",
+      "path": "vigas.materiales.fy",
+      "name": "Steel yield strength (beams)",
+      "name_es": "Resistencia a fluencia del acero (vigas)",
+      "cluster": "H",
+      "element_type": "vigas",
+      "data_type": "integer",
+      "valid_range": {"values": [4200, 2800]},
+      "unit": "kg/cm²",
+      "profiles": {
+        "simple":    {"value": 4200, "rationale": "Standard Grade 60 — universal in Colombia"},
+        "balanced":  {"value": 4200, "rationale": "Standard"},
+        "optimized": {"value": 4200, "rationale": "Standard — Grade 40 is rare in modern construction"}
+      },
+      "description": "Steel yield strength. 4200 kg/cm² (420 MPa, Grade 60) is the standard in Colombian construction. 2800 kg/cm² (Grade 40) exists but is uncommon.",
+      "construction_impact": {
+        "material_cost": "Higher fy → less steel area needed → lighter rebar",
+        "field_error_risk": "Standard grade → no confusion in procurement"
+      },
+      "interactions": [],
+      "example_from_config": 4200
+    },
+
+    {
+      "id": "P-H03",
+      "path": "columnas.materiales.fc.default",
+      "name": "Default concrete strength (columns)",
+      "name_es": "Resistencia del concreto por defecto (columnas)",
+      "cluster": "H",
+      "element_type": "columnas",
+      "data_type": "integer",
+      "valid_range": {"values": [210, 280, 350, 420, 490, 560]},
+      "unit": "kg/cm²",
+      "profiles": {
+        "simple":    {"value": 280, "rationale": "Standard for columns — higher than beams to support axial loads"},
+        "balanced":  {"value": 280, "rationale": "Standard"},
+        "optimized": {"value": 350, "rationale": "Higher grade for tall buildings — smaller column sections possible"}
+      },
+      "description": "Default concrete compressive strength for columns. Columns typically use higher concrete grades than beams due to axial load demands.",
+      "construction_impact": {
+        "material_cost": "Higher f'c → more expensive concrete but potentially smaller sections",
+        "field_error_risk": "Different column vs beam f'c → requires careful concrete placement sequencing"
+      },
+      "interactions": ["P-E04 (filtro_por_nivel for columns)"],
+      "example_from_config": 280
+    },
+
+    {
+      "id": "P-H04",
+      "path": "nervios.materiales.fc.default",
+      "name": "Default concrete strength (joists)",
+      "name_es": "Resistencia del concreto por defecto (nervios)",
+      "cluster": "H",
+      "element_type": "nervios",
+      "data_type": "integer",
+      "valid_range": {"values": [210, 280, 350, 420, 490, 560]},
+      "unit": "kg/cm²",
+      "profiles": {
+        "simple":    {"value": 210, "rationale": "Match slab concrete — simplest"},
+        "balanced":  {"value": 280, "rationale": "Standard"},
+        "optimized": {"value": 280, "rationale": "Higher grade can reduce joist reinforcement"}
+      },
+      "description": "Default concrete strength for joists (nervios). Usually matches the slab concrete grade since they are cast monolithically.",
+      "construction_impact": {
+        "material_cost": "Should match slab concrete to avoid confusion",
+        "field_error_risk": "Matching slab concrete → eliminates one source of error"
+      },
+      "interactions": ["P-E03 equivalent for joists"],
+      "example_from_config": 280
+    }
+  ],
+
+  "lookup_tables": {
+    "description": "The config contains several lookup tables that are code-derived (not tunable in the constructability sense) but are essential for the agent to understand and reference when explaining splice and development lengths.",
+
+    "long_ganchos": {
+      "description": "Hook extension lengths (cm) by hook angle (90°, 135°, 180°) and bar size id. These are code-mandated per ACI 318 / NSR-10 and are NOT tunable for constructability. They define the physical hook dimension that must be achieved in fabrication.",
+      "element_types": ["vigas", "nervios", "columnas"],
+      "indexed_by": "hook_angle × bar_id"
+    },
+
+    "lon_tras": {
+      "description": "Lap splice lengths (cm) by concrete strength and bar size. Code-derived from NSR-10 Chapter C.12. Not directly tunable, but the ENGINE applies factor_tras_cra and splice zone classification to compute the final splice length.",
+      "element_types": ["vigas", "columnas"],
+      "indexed_by": "fc × bar_id (beams); splice_condition × position × bar_id (columns)"
+    },
+
+    "Ld": {
+      "description": "Straight development lengths (cm) by concrete strength and bar size. Code-derived. The engine uses these to determine how far a bar must extend past the point of maximum stress.",
+      "element_types": ["vigas"],
+      "indexed_by": "fc × bar_id"
+    },
+
+    "Ldh_concreto": {
+      "description": "Hooked development lengths (cm) by concrete strength and bar size. Significantly shorter than straight Ld, which is why hooks are preferred at terminations. Code-derived.",
+      "element_types": ["vigas"],
+      "indexed_by": "fc × bar_id"
+    }
+  },
+
+  "foundation_beam_parameters": {
+    "description": "vigas_cimentacion section contains parameters specific to foundation/grade beams. These override certain beam defaults.",
+    "parameters": [
+      {
+        "id": "P-VC01",
+        "path": "vigas.vigas_cimentacion.cuan_minima",
+        "name": "Minimum reinforcement ratio (foundation beams)",
+        "name_es": "Cuantía mínima en vigas de cimentación",
+        "cluster": "G",
+        "description": "Minimum steel ratio for foundation beams. Default 0.0018 (shrinkage and temperature). Can be customized if personalizar=true.",
+        "example_from_config": {"personalizar": false, "valor": 0.0018}
+      },
+      {
+        "id": "P-VC02",
+        "path": "vigas.vigas_cimentacion.partir_refuerzo",
+        "name": "Reinforcement splitting distances (foundation beams)",
+        "name_es": "Distancias para partir refuerzo en vigas de cimentación",
+        "cluster": "D",
+        "description": "Controls where reinforcement can be split/curtailed: dist_a_caras (distance from element faces) and dist_min_apoyos (minimum distance from supports).",
+        "example_from_config": {"dist_a_caras": 1, "dist_min_apoyos": 3}
+      },
+      {
+        "id": "P-VC03",
+        "path": "vigas.vigas_cimentacion.sep_estribos",
+        "name": "Foundation beam stirrup spacing rule",
+        "name_es": "Regla de separación de estribos en vigas de cimentación",
+        "cluster": "C",
+        "description": "How stirrup spacing is determined: by minimum dimension of the section, fixed calibre, or custom. por_dimension='min_dimension' uses the smaller section dimension to set spacing.",
+        "example_from_config": {"calibre": 1, "por_dimension": "min_dimension", "personalizado": false}
+      }
+    ]
+  },
+
+  "post_tensioning_parameters": {
+    "description": "Global post-tensioning parameters (active when postensado=true). Not relevant for conventional RC detailing. Included for completeness.",
+    "active": false,
+    "parameters_summary": {
+      "alpha": "Wobble angle (0.1 rad)",
+      "long_acunamiento": "Wedge set length (0.6m)",
+      "calibre_cable": "Strand size id (2 = 1/2\")",
+      "as_cable": "Strand area (0.98 cm²)",
+      "k1/k2/k3": "Strand stress coefficients",
+      "cte_friccion": "Friction coefficient (0.07)",
+      "k_postensado": "Wobble coefficient (0.0033/m)",
+      "rec_cable": "Cable cover (3.5 cm)",
+      "fpy/fpu": "Yield/ultimate strand stress (17010/18900 kg/cm²)",
+      "fci/fc_pos": "Initial/final concrete strength (210/280 kg/cm²)",
+      "stress_limits": "Allowable stresses at initial (ci), permanent (cp), and total (ct) stages"
+    }
+  },
+
+  "joist_specific_parameters": {
+    "description": "Joist (nervio) parameters that differ from or supplement beam parameters.",
+    "parameters": [
+      {
+        "id": "P-N01",
+        "path": "nervios.norma.rec_traccion",
+        "name": "Joist cover — tension face",
+        "cluster": "G",
+        "description": "Typically 2cm for joists (vs 4cm for beams) due to thinner slab sections.",
+        "profiles": {"simple": 2, "balanced": 2, "optimized": 2},
+        "example_from_config": 2
+      },
+      {
+        "id": "P-N02",
+        "path": "nervios.param_despiece.empaq_N1L",
+        "name": "N1L packaging flag",
+        "cluster": "D",
+        "description": "Controls how single-layer joist reinforcement is packaged for delivery. 1 = enabled.",
+        "example_from_config": 1
+      },
+      {
+        "id": "P-N03",
+        "path": "nervios.param_despiece.base_maxima_N1L",
+        "name": "Maximum base width for N1L packaging",
+        "cluster": "D",
+        "description": "Maximum joist base width (cm) that qualifies for simplified N1L (single-layer) packaging. Wider joists get standard beam treatment.",
+        "example_from_config": 14
+      },
+      {
+        "id": "P-N04",
+        "path": "nervios.param_despiece.lon_bast",
+        "name": "Bastón (short bar) length mode",
+        "cluster": "B",
+        "description": "Controls how short supplementary bars (bastones) are dimensioned. 1 = standard calculation.",
+        "example_from_config": 1
+      },
+      {
+        "id": "P-N05",
+        "path": "nervios.param_despiece.cal_bast",
+        "name": "Bastón bar size override",
+        "cluster": "A",
+        "description": "When non-zero, forces a specific bar size for short supplementary bars in joists. 0 = engine decides.",
+        "example_from_config": 0
+      },
+      {
+        "id": "P-N06",
+        "path": "nervios.estribos.ramas_minimas_globales",
+        "name": "Minimum stirrup legs (joists)",
+        "cluster": "C",
+        "description": "Minimum stirrup legs for joists. Typically 1 (single-leg stirrup / S-hook) for narrow joists, vs 2 for beams.",
+        "profiles": {"simple": 1, "balanced": 1, "optimized": 1},
+        "example_from_config": 1
+      },
+      {
+        "id": "P-N07",
+        "path": "nervios.estribos.est_cor",
+        "name": "Corrido (continuous) stirrup configuration for joists",
+        "cluster": "C",
+        "description": "Default continuous stirrup setup for joists. Specifies interior and border stirrup: bar size (cal) and spacing (sep in cm). These provide a baseline transverse reinforcement throughout the joist.",
+        "example_from_config": {"default": {"int": {"val": 1, "cal": 0, "sep": 45}, "bor": {"val": 1, "cal": 0, "sep": 45}}}
+      }
+    ]
+  },
+
+  "column_specific_parameters": {
+    "description": "Column parameters with unique structure.",
+    "parameters": [
+      {
+        "id": "P-COL01",
+        "path": "columnas.norma.lon_tras",
+        "name": "Column splice lengths by condition",
+        "cluster": "B",
+        "description": "Column splice lengths are organized by splice condition: SRA (Sin Requisitos Adicionales = no additional requirements, i.e., non-confinement splices) and CRA (Con Requisitos Adicionales = confinement-required splices). Within each, I (inferior/below) and S (superior/above) provide different lengths by bar size. This reflects NSR-10 requirements where column splices in plastic hinge regions (CRA) must be longer than those in non-critical regions (SRA).",
+        "construction_impact": {
+          "material_cost": "CRA splices use ~30-50% more bar length than SRA",
+          "field_error_risk": "Crew must know which splice condition applies at each location",
+          "required_skill_level": "High — incorrect splice type is a critical structural deficiency"
+        },
+        "example_from_config": "SRA/I bar_id=2: 56cm, CRA/I bar_id=2: 73cm"
+      },
+      {
+        "id": "P-COL02",
+        "path": "columnas.norma.centroide_as",
+        "name": "Assumed steel centroid (columns)",
+        "cluster": "G",
+        "description": "5.5cm for columns — slightly less than beams because column bars are typically arranged symmetrically around the perimeter.",
+        "example_from_config": 5.5
+      }
+    ]
+  }
+}

@@ -3,10 +3,6 @@
 .env.local
 .env.*.local
 
-# Project documentation
-docs/
-*.md
-
 # Python
 __pycache__/
 *.py[cod]
@@ -50,12 +46,6 @@ venv_linux/
 # Logs
 *.log
 
-# results
-*.xlsx
-*.json
-*.html
-*.pdf
-
 # Testing
 .pytest_cache/
 .coverage
@@ -66,7 +56,7 @@ temp/
 tmp/
 *.tmp
 
-# results files
+# Results / output files
 logistics_outputs/
 
 # Project-specific files (configs, binaries, pipeline artifacts)
