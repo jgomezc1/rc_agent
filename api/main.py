@@ -28,7 +28,29 @@ if PROJECT_ROOT not in sys.path:
 from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+# Startup diagnostic: surface ProDet runtime issues immediately rather than
+# at the first tool call. Non-fatal — non-ProDet agents still work.
+try:
+    from prodet_agent import check_prodet_runtime
+    _runtime_status = check_prodet_runtime()
+    if _runtime_status["ok"]:
+        logger.info(
+            f"[ProDet runtime OK] python={_runtime_status['prodet_python']} "
+            f"root={_runtime_status['prodet_root']}"
+        )
+    else:
+        logger.warning(
+            "[ProDet runtime NOT READY] %s\n"
+            "ProDet tools will fail until this is fixed. "
+            "Non-ProDet agents (config, scheduling, procurement) still work.",
+            _runtime_status["message"],
+        )
+except Exception as _e:
+    logger.warning(f"Could not run ProDet runtime check: {_e}")
+    _runtime_status = {"ok": False, "message": str(_e)}
 
 app = FastAPI(title="ProDet Agent API", version="1.0.0")
 
@@ -54,6 +76,7 @@ class ChatRequest(BaseModel):
     query: str
     project: Optional[str] = None
     chat_history: Optional[list[ChatMessage]] = None
+    forced_agent: Optional[str] = None  # bypass router when set
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +106,11 @@ def _get_team():
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "message": "ProDet Agent API running"}
+    return {
+        "status": "ok",
+        "message": "ProDet Agent API running",
+        "prodet_runtime": _runtime_status,
+    }
 
 
 @app.get("/api/agents")
@@ -130,7 +157,11 @@ def chat_stream(req: ChatRequest):
                 query = f"[Active project: {req.project} — use projects/{req.project}/ for all file paths]\n{query}"
 
             # Route to the right agent and run
-            response, target = team.run(query, chat_history=chat_history)
+            response, target = team.run(
+                query,
+                chat_history=chat_history,
+                forced_agent=req.forced_agent,
+            )
 
             # Emit in chunks to give the UI a streaming feel
             chunk_size = 12

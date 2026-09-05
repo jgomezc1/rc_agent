@@ -214,12 +214,20 @@ class ProDetAgentTeam:
                 self._agents[key] = ConfigAgent()
         return self._agents[key]
 
-    def run(self, user_input: str, chat_history: list) -> tuple[str, str]:
+    def run(self, user_input: str, chat_history: list, forced_agent: str = None) -> tuple[str, str]:
         """Route the message to the appropriate agent.
+
+        Args:
+            forced_agent: If provided and valid, skip the LLM router and send
+                          the message directly to that agent. Pass None to
+                          use the router (default behavior).
 
         Returns (response_text, agent_key).
         """
-        target = self.router.classify(user_input, chat_history)
+        if forced_agent and forced_agent in VALID_AGENTS:
+            target = forced_agent
+        else:
+            target = self.router.classify(user_input, chat_history)
         agent = self._get_agent(target)
 
         response = agent.run(
