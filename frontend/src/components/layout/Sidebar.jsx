@@ -1,6 +1,7 @@
 import { Plus, FolderOpen, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { AGENT_LABELS } from "../../lib/constants";
+import BuildBadge from "./BuildBadge";
 
 export default function Sidebar({
   onNewChat, conversations, activeId, onSelectConversation,
@@ -117,6 +118,7 @@ export default function Sidebar({
 
       {/* Session info */}
       <div className="px-4 py-3 border-t border-slate-700 text-xs text-gray-500">
+        <BuildBadge />
         {lastRoute && (
           <div className="mb-1">
             Last: <span className="text-gray-400">
