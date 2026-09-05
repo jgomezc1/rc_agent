@@ -63,7 +63,93 @@ PRODET_PROJECTS = normalize_path(os.environ.get(
     "PRODET_PROJECTS",
     RC_AGENT_PROJECTS,
 ))
-PRODET_CONDA_ENV = os.environ.get("PRODET_CONDA_ENV", "ProDet-py39")
+# =============================================================================
+# ProDet Python resolution — find ProDet's venv python.exe (no conda).
+# =============================================================================
+
+_PRODET_PYTHON_RESOLVED: Optional[str] = None
+
+
+def _candidate_prodet_pythons() -> List[str]:
+    """Return likely paths to ProDet's venv python, in priority order."""
+    candidates: List[str] = []
+    explicit = os.environ.get("PRODET_PYTHON")
+    if explicit:
+        candidates.append(normalize_path(explicit))
+
+    # Preferred location on Windows: %LOCALAPPDATA%\rc_agent\venvs\prodet
+    # (set up by setup.bat — outside Dropbox to avoid sync conflicts).
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        candidates.append(normalize_path(
+            os.path.join(local_appdata, "rc_agent", "venvs", "prodet", "Scripts", "python.exe")
+        ))
+
+    # Legacy fallback: venv co-located with the ProDet repo. Discouraged when
+    # the repo is in a synced folder (Dropbox/OneDrive), but supported for
+    # users who keep their repo on a local-only path.
+    for venv_name in (".venv", "venv", "env"):
+        candidates.append(os.path.join(PRODET_ROOT, venv_name, "Scripts", "python.exe"))  # Windows
+        candidates.append(os.path.join(PRODET_ROOT, venv_name, "bin", "python"))          # POSIX
+        candidates.append(os.path.join(PRODET_ROOT, venv_name, "bin", "python3"))
+
+    return candidates
+
+
+def _resolve_prodet_python() -> str:
+    """Return an absolute path to ProDet's venv python.
+
+    Resolution order: PRODET_PYTHON env → %LOCALAPPDATA%/rc_agent/venvs/prodet
+    (created by setup.bat) → <PRODET_ROOT>/.venv → /venv → /env.
+    Raises RuntimeError with actionable remediation if nothing is found.
+    """
+    global _PRODET_PYTHON_RESOLVED
+    if _PRODET_PYTHON_RESOLVED is not None:
+        return _PRODET_PYTHON_RESOLVED
+
+    checked: List[str] = []
+    for path in _candidate_prodet_pythons():
+        checked.append(path)
+        if path and os.path.isfile(path):
+            _PRODET_PYTHON_RESOLVED = path
+            logger.info(f"Resolved ProDet python: {path}")
+            return path
+
+    raise RuntimeError(
+        "Could not find ProDet's Python venv.\n"
+        f"PRODET_ROOT={PRODET_ROOT}\n"
+        "Fix options:\n"
+        "  1. Run setup.bat in the rc_agent project root to create the venv.\n"
+        "  2. Set PRODET_PYTHON in .env to the absolute path of python.exe, e.g.\n"
+        "     PRODET_PYTHON=C:\\Users\\<you>\\Dropbox\\ProDes-Core\\.venv\\Scripts\\python.exe\n"
+        f"Locations checked: {checked}"
+    )
+
+
+def check_prodet_runtime() -> Dict[str, Any]:
+    """Diagnostic check for the ProDet runtime. Safe to call at startup.
+
+    Returns a dict with `ok`, `prodet_python`, `prodet_root_exists`, and a
+    human-readable `message`. Never raises.
+    """
+    info: Dict[str, Any] = {
+        "ok": False,
+        "prodet_python": None,
+        "prodet_root": PRODET_ROOT,
+        "prodet_root_exists": os.path.isdir(PRODET_ROOT),
+        "message": "",
+    }
+    if not info["prodet_root_exists"]:
+        info["message"] = f"PRODET_ROOT does not exist: {PRODET_ROOT}"
+        return info
+    try:
+        info["prodet_python"] = _resolve_prodet_python()
+        info["ok"] = True
+        info["message"] = "ProDet runtime ready."
+    except RuntimeError as e:
+        info["message"] = str(e)
+    return info
+
 
 # ProDet output filenames by element type (key char from tipo[0])
 PRODET_OUTPUT_FILENAMES = {
@@ -321,9 +407,9 @@ def _run_prodet_single(
 
         project_arg = project_path.rstrip("/\\") + os.sep
 
+        prodet_python = _resolve_prodet_python()
         cmd = [
-            "conda", "run", "-n", PRODET_CONDA_ENV,
-            "python", "core/main.py", project_arg, element_type,
+            prodet_python, "core/main.py", project_arg, element_type,
         ]
         logger.info(f"Running ProDet: {' '.join(cmd)} (cwd={PRODET_ROOT})")
 
@@ -336,12 +422,23 @@ def _run_prodet_single(
         early_exit = False
         return_code = None
 
+        # Redirect ProDet's stdout/stderr to a file (not a PIPE) to avoid a
+        # classic pipe-deadlock: ProDet logs continuously; the OS pipe buffer
+        # is ~64 KB on Windows; when it fills and no one is reading, ProDet
+        # blocks on its next write and the whole run stalls.
+        log_path = os.path.join(project_path, f"prodet_subprocess_{element_type}.log")
+        try:
+            log_file = open(log_path, "w", encoding="utf-8", errors="replace")
+        except Exception as e:
+            logger.warning(f"Could not open subprocess log {log_path}: {e}")
+            log_file = subprocess.DEVNULL  # type: ignore[assignment]
+
         proc = subprocess.Popen(
             cmd,
             cwd=PRODET_ROOT,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
         )
 
         try:
@@ -395,13 +492,22 @@ def _run_prodet_single(
 
         elapsed = (datetime.now() - start_time).total_seconds()
 
-        # Collect whatever stdout/stderr was produced
+        # Close the log file handle (proc has already written everything it will)
+        if hasattr(log_file, "close"):
+            try:
+                log_file.close()
+            except Exception:
+                pass
+
+        # Read the tail of the subprocess log for the response
         stdout = ""
         stderr = ""
         try:
-            out, err = proc.communicate(timeout=5)
-            stdout = out or ""
-            stderr = err or ""
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                f.seek(max(0, size - 2000))
+                stdout = f.read()
         except Exception:
             pass
 
@@ -592,20 +698,28 @@ def _run_prodet_postprocess(
         return {"error": f"{stage} script not found: {script}"}
 
     project_arg = project_path.rstrip("/\\") + os.sep
+    prodet_python = _resolve_prodet_python()
     cmd = [
-        "conda", "run", "-n", PRODET_CONDA_ENV,
-        "python", script, project_arg, element_type,
+        prodet_python, script, project_arg, element_type,
     ]
     logger.info(f"Running ProDet {stage}: {' '.join(cmd)} (cwd={PRODET_ROOT})")
 
     start_time = datetime.now()
+    # Redirect to a per-stage log file to avoid pipe-buffer deadlock (see
+    # comment in _run_prodet_single for the full explanation).
+    log_path = os.path.join(project_path, f"prodet_subprocess_{stage}_{element_type}.log")
+    try:
+        log_file = open(log_path, "w", encoding="utf-8", errors="replace")
+    except Exception as e:
+        logger.warning(f"Could not open subprocess log {log_path}: {e}")
+        log_file = subprocess.DEVNULL  # type: ignore[assignment]
     try:
         proc = subprocess.Popen(
             cmd,
             cwd=PRODET_ROOT,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
         )
 
         try:
@@ -636,11 +750,19 @@ def _run_prodet_postprocess(
 
         elapsed = (datetime.now() - start_time).total_seconds()
 
+        if hasattr(log_file, "close"):
+            try:
+                log_file.close()
+            except Exception:
+                pass
+
         stdout, stderr = "", ""
         try:
-            out, err = proc.communicate(timeout=5)
-            stdout = out or ""
-            stderr = err or ""
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                f.seek(max(0, size - 2000))
+                stdout = f.read()
         except Exception:
             pass
 
