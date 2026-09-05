@@ -9,7 +9,7 @@ export function useChat() {
   const [lastRoute, setLastRoute] = useState(null);
   const [sessionCost, setSessionCost] = useState(0);
 
-  const sendMessage = useCallback(async (query, project, previousMessages) => {
+  const sendMessage = useCallback(async (query, project, previousMessages, forcedAgent) => {
     const userMsg = { role: "user", content: query, id: Date.now() };
     const assistantId = Date.now() + 1;
     const assistantMsg = {
@@ -39,6 +39,7 @@ export function useChat() {
         body: JSON.stringify({
           query,
           project: project || null,
+          forced_agent: forcedAgent || null,
           chat_history: (previousMessages || [])
             .filter((m) => m.role === "user" || m.role === "assistant")
             .map((m) => ({ role: m.role, content: m.content })),

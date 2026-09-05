@@ -7,6 +7,7 @@ export default function AppShell({
   onNewChat, conversations,
   activeConversationId, onSelectConversation,
   projects, activeProject, onSelectProject,
+  selectedAgent, onSelectAgent,
   lastRoute, sessionCost,
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -35,6 +36,8 @@ export default function AppShell({
           projects={projects}
           activeProject={activeProject}
           onSelectProject={onSelectProject}
+          selectedAgent={selectedAgent}
+          onSelectAgent={onSelectAgent}
           lastRoute={lastRoute}
           sessionCost={sessionCost}
         />

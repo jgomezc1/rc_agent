@@ -5,6 +5,7 @@ import { AGENT_LABELS } from "../../lib/constants";
 export default function Sidebar({
   onNewChat, conversations, activeId, onSelectConversation,
   projects, activeProject, onSelectProject,
+  selectedAgent, onSelectAgent,
   lastRoute, sessionCost,
 }) {
   const [projectDropdown, setProjectDropdown] = useState(false);
@@ -67,6 +68,31 @@ export default function Sidebar({
           <Plus size={16} />
           New conversation
         </button>
+
+        {/* Agent selector */}
+        <div className="text-xs text-gray-500 uppercase tracking-wider mt-4 mb-2 px-2">
+          Agent
+        </div>
+        {[
+          { key: null, label: "Auto-route" },
+          ...Object.entries(AGENT_LABELS).map(([key, label]) => ({ key, label })),
+        ].map(({ key, label }) => {
+          const isActive = (selectedAgent ?? null) === key;
+          return (
+            <button
+              key={key ?? "auto"}
+              onClick={() => onSelectAgent?.(key)}
+              className={`w-full text-left px-2 py-1.5 rounded-md text-sm flex items-center gap-2 transition-colors ${
+                isActive ? "bg-slate-700 text-blue-400" : "text-gray-300 hover:bg-slate-800"
+              }`}
+            >
+              <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
+                isActive ? "bg-blue-400" : "bg-slate-600"
+              }`} />
+              <span className="truncate">{label}</span>
+            </button>
+          );
+        })}
 
         <div className="text-xs text-gray-500 uppercase tracking-wider mt-4 mb-2 px-2">
           Recent

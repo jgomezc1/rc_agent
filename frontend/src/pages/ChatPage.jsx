@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { useChat } from "../hooks/useChat";
 import { useProjects } from "../hooks/useProjects";
 import AppShell from "../components/layout/AppShell";
@@ -19,6 +19,7 @@ export default function ChatPage() {
   } = useChat();
 
   const { projects, activeProject, setActiveProject } = useProjects();
+  const [selectedAgent, setSelectedAgent] = useState(null); // null = auto-route
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -43,11 +44,13 @@ export default function ChatPage() {
       projects={projects}
       activeProject={activeProject}
       onSelectProject={setActiveProject}
+      selectedAgent={selectedAgent}
+      onSelectAgent={setSelectedAgent}
       lastRoute={lastRoute}
       sessionCost={sessionCost}
       footer={
         <InputBar
-          onSendMessage={(query) => sendMessage(query, activeProject, messages)}
+          onSendMessage={(query) => sendMessage(query, activeProject, messages, selectedAgent)}
           isStreaming={isStreaming}
         />
       }
@@ -56,7 +59,7 @@ export default function ChatPage() {
         <ChatThread
           messages={messages}
           isStreaming={isStreaming}
-          onSelectQuery={(text) => sendMessage(text, activeProject, messages)}
+          onSelectQuery={(text) => sendMessage(text, activeProject, messages, selectedAgent)}
         />
         <div ref={bottomRef} />
       </div>
