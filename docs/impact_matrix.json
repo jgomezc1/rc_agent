@@ -1,0 +1,703 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "description": "ProDet Impact Matrix — Maps parameter clusters and key parameters to construction outcome dimensions with directional effects, magnitudes, and causal reasoning. This is the reasoning backbone for the NL↔Config bidirectional agent system.",
+    "author": "RDC Consultores / ProDet Agent System",
+    "date": "2026-02-27",
+    "companion_document": "parameter_semantic_catalog.json",
+    "usage": "The agent loads this matrix alongside the Parameter Semantic Catalog. When translating NL→Config, the agent identifies target dimensions from the NL request, then uses the matrix to determine which parameter clusters and values achieve those targets. When translating Config→NL, the agent reads parameter values, looks up their effects in this matrix, and synthesizes a narrative of trade-offs."
+  },
+
+  "dimensions": {
+    "material_cost": {
+      "id": "D1",
+      "name": "Material Cost",
+      "name_es": "Costo de Material",
+      "description": "Total weight of reinforcing steel (kg) and, secondarily, concrete cost implications. Driven by how tightly the solution is optimized versus how much excess steel the simplifications introduce.",
+      "unit": "kg (steel) / COP (total)",
+      "stakeholders": ["owner", "contractor", "cost_engineer"],
+      "measurable_proxy": "Total steel weight from ProDet quantity report; steel weight per m² of floor area",
+      "typical_range": "For a 25-story building: 40-70 kg/m² of steel depending on seismic zone, spans, and detailing strategy"
+    },
+    "piece_count": {
+      "id": "D2",
+      "name": "Piece Count / Logistics Complexity",
+      "name_es": "Cantidad de Piezas / Complejidad Logística",
+      "description": "Number of distinct bar types (unique combinations of diameter, length, shape) in the project. Drives warehouse management, sorting on site, delivery scheduling, and cutting schedule complexity.",
+      "unit": "count of unique bar entries on cutting schedule",
+      "stakeholders": ["contractor", "rebar_supplier", "site_foreman"],
+      "measurable_proxy": "Number of unique entries in ProDet's bar schedule (despiece) report",
+      "typical_range": "Simple configs may produce 50-100 unique bar types per floor; optimized configs may produce 200-400"
+    },
+    "field_error_risk": {
+      "id": "D3",
+      "name": "Field Error Risk",
+      "name_es": "Riesgo de Error en Campo",
+      "description": "Probability that the construction crew will make installation mistakes — wrong bar size, wrong position, wrong splice location, wrong hook orientation. Errors range from minor (caught by inspection, reworked) to critical (missed, compromising structural integrity).",
+      "unit": "qualitative (low / medium / high)",
+      "stakeholders": ["structural_engineer", "site_foreman", "QA_inspector", "owner"],
+      "measurable_proxy": "Number of non-conformances per floor in QA/QC reports; RFI count related to rebar",
+      "typical_range": "Simple configs: 1-3 non-conformances per floor; Complex configs: 5-15 per floor"
+    },
+    "installation_speed": {
+      "id": "D4",
+      "name": "Installation Speed",
+      "name_es": "Velocidad de Instalación",
+      "description": "How fast the crew can complete rebar placement for a given floor. Combines: bar handling time, tying time, sorting time, decision-making time, and rework time. Directly affects construction schedule.",
+      "unit": "man-hours per floor or kg/man-hour",
+      "stakeholders": ["contractor", "site_foreman", "project_manager"],
+      "measurable_proxy": "Days per floor for rebar installation; productivity in kg/man-hour",
+      "typical_range": "Experienced crew: 15-25 kg/man-hour for simple configs, 8-15 kg/man-hour for complex configs"
+    },
+    "required_skill_level": {
+      "id": "D5",
+      "name": "Required Skill Level",
+      "name_es": "Nivel de Habilidad Requerido",
+      "description": "Minimum crew experience and expertise needed to correctly execute the rebar installation. Higher skill requirements mean higher labor cost, smaller available workforce, and higher risk if under-skilled crews are used.",
+      "unit": "qualitative (basic / intermediate / advanced)",
+      "stakeholders": ["contractor", "HR/labor_manager", "site_foreman"],
+      "measurable_proxy": "Minimum years of ironworker experience needed; required certifications",
+      "typical_range": "Simple configs: basic crew (1-2 years experience); Optimized configs: advanced crew (5+ years, reading complex drawings)"
+    },
+    "drawing_clarity": {
+      "id": "D6",
+      "name": "Drawing Clarity",
+      "name_es": "Claridad de Planos",
+      "description": "How easy it is for the field crew and foreman to read, understand, and execute from the shop drawings. Affected by: number of annotations per sheet, consistency of conventions, scale readability, and information density.",
+      "unit": "qualitative (clear / moderate / dense)",
+      "stakeholders": ["site_foreman", "ironworker_crew", "QA_inspector"],
+      "measurable_proxy": "RFIs related to drawing interpretation; time foreman spends studying drawings per floor",
+      "typical_range": "Clear drawings: <30 min review per floor; Dense drawings: 1-2 hours per floor"
+    },
+    "inspection_complexity": {
+      "id": "D7",
+      "name": "Inspection Complexity",
+      "name_es": "Complejidad de Inspección",
+      "description": "How difficult it is for QA/QC inspectors to verify that installed rebar matches the drawings. More bar types, more splice zone restrictions, more per-level variations = more checks per floor.",
+      "unit": "qualitative (simple / moderate / complex)",
+      "stakeholders": ["QA_inspector", "structural_engineer", "building_authority"],
+      "measurable_proxy": "Inspector hours per floor; checklist item count",
+      "typical_range": "Simple: 2-4 inspector-hours per floor; Complex: 8-16 inspector-hours per floor"
+    },
+    "adaptability": {
+      "id": "D8",
+      "name": "Adaptability / Field Tolerance",
+      "name_es": "Adaptabilidad / Tolerancia en Campo",
+      "description": "How forgiving the design is when site conditions deviate from drawings — column slightly shifted, beam dimension slightly off, rebar delivered in wrong length. Robust designs absorb deviations; tight designs require change orders.",
+      "unit": "qualitative (forgiving / moderate / tight)",
+      "stakeholders": ["site_foreman", "contractor", "structural_engineer"],
+      "measurable_proxy": "Number of change orders or field modifications per floor",
+      "typical_range": "Forgiving: 0-1 change orders per floor; Tight: 3-8 per floor"
+    }
+  },
+
+  "cluster_impact_matrix": {
+    "description": "For each cluster × dimension pair: the directional effect when moving from Simple → Optimized profile, the magnitude of that effect, and the causal reasoning.",
+
+    "A_bar_complexity_envelope": {
+      "material_cost": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "medium",
+        "reasoning": "Wider bar range allows the optimizer to select the minimum steel area that satisfies demand at each section. Narrow ranges force oversizing in low-demand zones. Typical savings: 5-12% total steel weight when moving from Simple to Optimized.",
+        "key_parameters": ["calibre_min", "calibre_max", "dif_max_cal"]
+      },
+      "piece_count": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "high",
+        "reasoning": "This is the primary effect. A narrow 2-diameter range (Simple) might produce 60 unique bar entries per floor. A wide 6-diameter range (Optimized) can produce 200+. The merging parameters (dif_cal_unir_*) partially counteract this in the Simple direction by grouping similar bars together.",
+        "key_parameters": ["calibre_min", "calibre_max", "dif_max_cal", "dif_cal_unir_ppal", "dif_cal_unir_adic"]
+      },
+      "field_error_risk": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "high",
+        "reasoning": "More bar types on site = more opportunities for the crew to pick up the wrong bar. This is the #1 source of rebar installation errors in practice. When bars of adjacent sizes (e.g., 5/8\" and 3/4\") look similar, visual identification fails. Color-coding and tagging mitigate but don't eliminate this risk.",
+        "key_parameters": ["dif_max_cal", "calibre_min", "calibre_max"]
+      },
+      "installation_speed": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "medium",
+        "reasoning": "More bar types means more sorting time, more trips to the stockpile, more decision-making at each placement point. The crew productivity difference between a 2-type and a 6-type bar population is roughly 20-40% in time per floor.",
+        "key_parameters": ["dif_max_cal", "dif_cal_unir_ppal"]
+      },
+      "required_skill_level": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "medium",
+        "reasoning": "With many bar types, the crew needs to read drawings more carefully and make correct identification decisions. A basic crew can execute a 2-type solution; a 6-type solution needs workers who can read bar marks and verify sizes.",
+        "key_parameters": ["dif_max_cal"]
+      },
+      "drawing_clarity": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "medium",
+        "reasoning": "More bar types per section = more annotations, more leader lines, denser cross-section details. Drawings become harder to parse visually.",
+        "key_parameters": ["dif_max_cal", "calibre_min", "calibre_max"]
+      },
+      "inspection_complexity": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "medium",
+        "reasoning": "Inspector must verify more distinct bar sizes are in the correct positions. With 2 types, a visual scan suffices. With 6 types, caliper measurements or tag verification is needed for each bar.",
+        "key_parameters": ["dif_max_cal"]
+      },
+      "adaptability": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "low",
+        "reasoning": "With optimized bars, each bar is sized exactly for its demand. If a beam dimension changes slightly, the specific bar may no longer be adequate. With oversized bars (Simple), there's built-in safety margin that absorbs minor changes.",
+        "key_parameters": ["calibre_min"]
+      }
+    },
+
+    "B_splice_and_development": {
+      "material_cost": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "medium_to_high",
+        "reasoning": "Splice strategy has a large material impact. Always-splice (Simple) adds lap material at every support — for a typical beam with 4 supports, this adds 4 × splice_length × n_bars of extra steel. Restricted splice zones (Optimized) use shorter Class A splices in low-stress zones, and continuous bars eliminate splice material entirely. Typical savings: 8-15% of beam steel.",
+        "key_parameters": ["empalmar_siempre", "zonas_empalme", "forzar_traslapo_GG"]
+      },
+      "piece_count": {
+        "direction_simple_to_optimized": "mixed",
+        "magnitude": "medium",
+        "reasoning": "Complex interaction. Always-splice creates more pieces (each span has its own bars). But continuous bars (Optimized) create fewer, longer pieces — which may require special handling. Net effect on logistics depends on bar lengths relative to max_long_NE.",
+        "key_parameters": ["empalmar_siempre", "max_long_NE"]
+      },
+      "field_error_risk": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "high",
+        "reasoning": "This is the critical dimension for Cluster B. When zonas_empalme='todo', the crew can splice anywhere — zero positioning risk. When zonas_empalme='centro', the splice MUST fall within a specific zone of the span. A mispositioned splice is a code violation that may require remediation. Splice zone errors are among the most common and costly rebar defects.",
+        "key_parameters": ["zonas_empalme", "empalmar_siempre"]
+      },
+      "installation_speed": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "medium",
+        "reasoning": "Restricted splice zones require the crew to measure and position bars more precisely. Continuous bars across multiple spans require coordinated lifting and threading through reinforcement cages. Both slow down installation compared to standard span-by-span splicing.",
+        "key_parameters": ["zonas_empalme", "empalmar_siempre"]
+      },
+      "required_skill_level": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "high",
+        "reasoning": "Understanding splice zone classifications (Class A vs. Class B, confinement vs. non-confinement) and applying them correctly in the field requires experienced ironworkers and an attentive foreman. The Simple approach (splice anywhere) requires almost no understanding of splice theory.",
+        "key_parameters": ["zonas_empalme", "factor_tras_cra"]
+      },
+      "drawing_clarity": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "low",
+        "reasoning": "Splice zone restrictions add annotation to drawings (zone markers, splice length callouts), but the effect on overall drawing clarity is modest compared to bar diversity (Cluster A).",
+        "key_parameters": ["zonas_empalme"]
+      },
+      "inspection_complexity": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "high",
+        "reasoning": "With restricted splice zones, the inspector must verify not just THAT bars are spliced but WHERE they are spliced. This requires measuring splice positions relative to support faces — a significant additional inspection task that is often done imperfectly.",
+        "key_parameters": ["zonas_empalme"]
+      },
+      "adaptability": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "medium",
+        "reasoning": "Restricted splice zones have no tolerance for field adjustments. If a bar is cut 10cm too short, the splice may fall outside the allowed zone. With zonas_empalme='todo', the same 10cm error is irrelevant.",
+        "key_parameters": ["zonas_empalme"]
+      }
+    },
+
+    "C_stirrup_configuration": {
+      "material_cost": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "low_to_medium",
+        "reasoning": "Stirrup optimization (variable spacing per zone, smaller stirrups where demand allows) saves some steel, but stirrups are a smaller fraction of total rebar (~15-25% of beam steel) than longitudinal bars. Typical savings: 3-8% of total beam steel.",
+        "key_parameters": ["calibre_est_ext range", "calibre_est_int range"]
+      },
+      "piece_count": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "high",
+        "reasoning": "Stirrup piece count is extremely sensitive to configuration. A single stirrup size at 2-3 spacing zones per span might produce 3-4 stirrup entries per beam. Multiple sizes with variable spacing can produce 8-12 entries per beam. Across a floor with 30+ beams, this multiplies rapidly.",
+        "key_parameters": ["calibre_est_ext range", "calibre_est_int range"]
+      },
+      "field_error_risk": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "medium",
+        "reasoning": "Multiple stirrup sizes and variable spacing zones create opportunities for the crew to use the wrong stirrup type in the wrong zone. However, stirrup errors are generally less critical than longitudinal bar errors because they affect shear capacity (which usually has more safety margin) rather than flexural capacity.",
+        "key_parameters": ["calibre_est_ext range", "soporte_zonas_conf"]
+      },
+      "installation_speed": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "high",
+        "reasoning": "This is where stirrup configuration has its biggest impact. Stirrup tying is the single most time-consuming task in rebar installation. Each stirrup must be positioned, hooked around longitudinal bars, and tied. More stirrups (tighter spacing) and more stirrup types (requiring sorting) compound the time cost. A uniform 3/8\" stirrup at single spacing is roughly 40-60% faster to install than a variable multi-size configuration.",
+        "key_parameters": ["calibre_est_ext range", "calibre_est_int range"]
+      },
+      "required_skill_level": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "medium",
+        "reasoning": "Multi-leg stirrups, variable spacing zones, and confinement transitions require the crew to understand zone layouts and stirrup type assignments. Single-type uniform stirrups are accessible to any basic crew.",
+        "key_parameters": ["soporte_zonas_conf"]
+      },
+      "drawing_clarity": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "medium",
+        "reasoning": "Stirrup schedules with multiple types and spacing zones add significant annotation to beam elevations. The standard notation (e.g., 'E 3/8\" @ 0.10/0.15/0.20') becomes denser with more zones.",
+        "key_parameters": ["calibre_est_ext range", "soporte_zonas_conf"]
+      },
+      "inspection_complexity": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "medium",
+        "reasoning": "Inspector must verify stirrup size, spacing, and hook details at multiple zones per beam. With variable configurations, this is a per-zone check rather than a single per-beam check.",
+        "key_parameters": ["soporte_zonas_conf", "calibre_est_ext range"]
+      },
+      "adaptability": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "low",
+        "reasoning": "Stirrup configurations are relatively adaptable because the stirrups are fabricated to fit the section and spacing is measured on site. Minor dimensional changes don't typically affect stirrup sizing.",
+        "key_parameters": []
+      }
+    },
+
+    "D_geometric_tolerances_merging": {
+      "material_cost": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "medium",
+        "reasoning": "Coarse long_homog rounding (value 2 = 1.00m multiples) rounds every bar up to the next meter — a bar that structurally needs 2.35m gets cut to 3.00m. Typical excess: 3-8% of longitudinal steel in the Simple profile versus near-zero in Optimized. Note: tol_union still exists in config files but no longer produces changes in reinforcement; effective merging is controlled by long_homog.",
+        "key_parameters": ["long_homog"]
+      },
+      "piece_count": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "high",
+        "reasoning": "This cluster's PRIMARY effect. long_homog rounds all cutting lengths to coarser increments (value 0=10cm, 1=50cm, 2=100cm multiples), collapsing many distinct lengths into the same rounded value. Coarse rounding (long_homog=2) can reduce unique bar entries by 40-60%. This is the most direct lever for piece count.",
+        "key_parameters": ["long_homog"]
+      },
+      "field_error_risk": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "medium",
+        "reasoning": "Fewer distinct bar lengths (Simple) means fewer opportunities to pick the wrong bar from the stockpile. When all 8m beams use the same bar length, there's nothing to confuse. When each beam has a unique bar length, the tag on every bar must be checked.",
+        "key_parameters": ["long_homog"]
+      },
+      "installation_speed": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "medium",
+        "reasoning": "Standardized bar lengths (Simple) allow batch processing — the crew grabs a bundle and installs sequentially without measuring or verifying individual bars. Unique lengths (Optimized) require per-bar identification and positioning.",
+        "key_parameters": ["long_homog", "max_long_NE"]
+      },
+      "required_skill_level": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "low",
+        "reasoning": "The effect on skill level is modest — standardized vs. unique bar lengths primarily affects speed and error risk rather than technical complexity.",
+        "key_parameters": []
+      },
+      "drawing_clarity": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "medium",
+        "reasoning": "Fewer unique bars (Simple) means fewer annotations per beam, cleaner bar schedules, and more white space on drawings. Many unique bars (Optimized) means dense annotation and potentially multiple bar schedule pages per floor.",
+        "key_parameters": ["long_homog"]
+      },
+      "inspection_complexity": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "low_to_medium",
+        "reasoning": "With standardized lengths, the inspector can verify by visual pattern recognition. With unique lengths, individual bar measurements may be needed.",
+        "key_parameters": ["long_homog"]
+      },
+      "adaptability": {
+        "direction_simple_to_optimized": "decreases",
+        "magnitude": "medium",
+        "reasoning": "Bars that are already extended beyond structural need (Simple/coarse rounding) have built-in margin. If a beam turns out to be 5cm longer than drawn, an already-oversized bar may still work. A precisely-cut bar (Optimized) won't.",
+        "key_parameters": ["long_homog", "max_long_NE"]
+      }
+    },
+
+    "F_drawing_presentation": {
+      "material_cost": {
+        "direction_simple_to_optimized": "neutral",
+        "magnitude": "none",
+        "reasoning": "Drawing parameters don't affect steel quantities."
+      },
+      "piece_count": {
+        "direction_simple_to_optimized": "neutral",
+        "magnitude": "none",
+        "reasoning": "Drawing parameters don't affect bar count."
+      },
+      "field_error_risk": {
+        "direction_simple_to_optimized": "mixed",
+        "magnitude": "medium",
+        "reasoning": "Better drawing organization reduces misinterpretation. However, 'better' isn't a Simple-to-Optimized spectrum here — it depends on matching the drawing format to the crew's workflow. por_piso is best for floor-by-floor construction; inline fills empty space with elements from consecutive stories.",
+        "key_parameters": ["tipo_diagramacion", "apoyos_con_hatch"]
+      },
+      "installation_speed": {
+        "direction_simple_to_optimized": "neutral",
+        "magnitude": "low",
+        "reasoning": "Drawing format has a minor effect on installation speed — mainly through reduced time looking up information.",
+        "key_parameters": ["tipo_diagramacion"]
+      },
+      "required_skill_level": {
+        "direction_simple_to_optimized": "neutral",
+        "magnitude": "none",
+        "reasoning": "Drawing format doesn't change what the crew needs to do, only how they find information."
+      },
+      "drawing_clarity": {
+        "direction_simple_to_optimized": "context_dependent",
+        "magnitude": "high",
+        "reasoning": "This cluster IS drawing clarity. The effect depends on matching the format to the construction method and crew size. Larger scales (lower denominator) are always clearer but produce more sheets. por_piso is clearest for most Colombian high-rise construction.",
+        "key_parameters": ["tipo_diagramacion", "apoyos_con_hatch", "size"]
+      },
+      "inspection_complexity": {
+        "direction_simple_to_optimized": "mixed",
+        "magnitude": "low",
+        "reasoning": "Clearer drawings make inspection easier, but the drawing format doesn't change what needs to be inspected.",
+        "key_parameters": ["tipo_diagramacion"]
+      },
+      "adaptability": {
+        "direction_simple_to_optimized": "neutral",
+        "magnitude": "none",
+        "reasoning": "Drawing format doesn't affect field adaptability."
+      }
+    },
+
+    "G_code_design_basis": {
+      "material_cost": {
+        "direction_simple_to_optimized": "not_applicable",
+        "magnitude": "high_but_fixed",
+        "reasoning": "Code parameters (demanda, covers, strain limits) set the baseline steel requirement. DES requires ~20-40% more steel than DMO due to confinement and capacity design. But these are NOT tunable — they are fixed by the project's seismic classification.",
+        "key_parameters": ["demanda"]
+      },
+      "piece_count": {
+        "direction_simple_to_optimized": "not_applicable",
+        "magnitude": "low",
+        "reasoning": "Code parameters affect quantities but not diversity of bar types."
+      },
+      "field_error_risk": {
+        "direction_simple_to_optimized": "not_applicable",
+        "magnitude": "medium",
+        "reasoning": "Higher seismic demand (DES) introduces more confinement zones, tighter stirrup spacing, and more splice restrictions — all of which increase error opportunities. But this is a project given, not a design choice.",
+        "key_parameters": ["demanda"]
+      },
+      "installation_speed": {
+        "direction_simple_to_optimized": "not_applicable",
+        "magnitude": "medium",
+        "reasoning": "DES confinement details are slower to install than DMO or DMI details."
+      },
+      "required_skill_level": {
+        "direction_simple_to_optimized": "not_applicable",
+        "magnitude": "high",
+        "reasoning": "DES requires crews who understand plastic hinge regions, confinement requirements, and capacity design principles.",
+        "key_parameters": ["demanda"]
+      },
+      "drawing_clarity": {
+        "direction_simple_to_optimized": "not_applicable",
+        "magnitude": "low",
+        "reasoning": "Code basis affects drawing content but not drawing organization."
+      },
+      "inspection_complexity": {
+        "direction_simple_to_optimized": "not_applicable",
+        "magnitude": "high",
+        "reasoning": "DES projects require significantly more thorough inspection — confinement zones, splice locations, hook details must all be verified against stricter criteria.",
+        "key_parameters": ["demanda"]
+      },
+      "adaptability": {
+        "direction_simple_to_optimized": "not_applicable",
+        "magnitude": "low",
+        "reasoning": "Code parameters don't directly affect field adaptability."
+      }
+    },
+
+    "H_material_specification": {
+      "material_cost": {
+        "direction_simple_to_optimized": "complex",
+        "magnitude": "medium",
+        "reasoning": "Higher f'c concrete is more expensive per m³ but produces shorter development and splice lengths, reducing steel weight. The net cost effect depends on the local concrete-to-steel price ratio. In Colombia (2024-2026), steel is relatively more expensive than concrete, so higher f'c often yields net savings. However, using different f'c grades on different floors introduces procurement complexity.",
+        "key_parameters": ["fc.default (beams, columns, joists)"]
+      },
+      "piece_count": {
+        "direction_simple_to_optimized": "slightly_increases",
+        "magnitude": "low",
+        "reasoning": "Different f'c per floor means different development lengths per floor, which can produce different bar lengths for otherwise identical beams on different floors.",
+        "key_parameters": ["fc.filtro_por_nivel"]
+      },
+      "field_error_risk": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "medium_to_high",
+        "reasoning": "Multiple concrete grades are a critical error source. Placing 210 kg/cm² concrete in a column designed for 280 kg/cm² is a structural deficiency that may require demolition. This is one of the most expensive possible construction errors.",
+        "key_parameters": ["fc.filtro_por_nivel"]
+      },
+      "installation_speed": {
+        "direction_simple_to_optimized": "neutral",
+        "magnitude": "none",
+        "reasoning": "Concrete grade doesn't affect rebar installation speed directly."
+      },
+      "required_skill_level": {
+        "direction_simple_to_optimized": "slightly_increases",
+        "magnitude": "low",
+        "reasoning": "The crew doesn't need to know the concrete grade for rebar purposes, but the foreman and concrete crew must coordinate closely when multiple grades are in use.",
+        "key_parameters": ["fc.filtro_por_nivel"]
+      },
+      "drawing_clarity": {
+        "direction_simple_to_optimized": "neutral",
+        "magnitude": "none",
+        "reasoning": "Concrete grades are typically noted on structural plans, not shop drawings."
+      },
+      "inspection_complexity": {
+        "direction_simple_to_optimized": "increases",
+        "magnitude": "medium",
+        "reasoning": "Inspector must verify correct concrete grade via delivery tickets and cylinder testing for each pour zone. More grades = more verification.",
+        "key_parameters": ["fc.filtro_por_nivel"]
+      },
+      "adaptability": {
+        "direction_simple_to_optimized": "neutral",
+        "magnitude": "none",
+        "reasoning": "Concrete grade doesn't affect rebar adaptability."
+      }
+    }
+  },
+
+  "interaction_effects": {
+    "description": "Some cluster combinations produce non-linear or emergent effects that are greater than the sum of individual cluster effects.",
+
+    "B_plus_D": {
+      "name": "Splice Strategy × Merging Tolerance",
+      "effect": "compounding",
+      "reasoning": "Restricted splice zones (Cluster B Optimized) combined with low merging tolerances (Cluster D Optimized) produces bars that must be cut to exact lengths AND placed at exact positions. Each bar is unique and its splice must land in a specific zone — there's no margin for either length error or position error. Conversely, always-splice + high tolerance (both Simple) means standardized bar lengths that can splice anywhere — maximum field freedom.",
+      "dimensions_amplified": ["field_error_risk", "adaptability", "required_skill_level"]
+    },
+
+    "A_plus_C": {
+      "name": "Bar Diversity × Stirrup Diversity",
+      "effect": "additive_congestion",
+      "reasoning": "Wide longitudinal bar range (Cluster A Optimized) combined with variable stirrup configurations (Cluster C Optimized) creates maximum congestion at beam-column joints. Multiple longitudinal bar sizes with different development lengths meeting multiple stirrup types at different spacings is the most complex rebar installation scenario. This specifically affects: concrete consolidation difficulty, inspection feasibility in joints, and joint assembly time.",
+      "dimensions_amplified": ["installation_speed", "field_error_risk", "inspection_complexity"]
+    },
+
+    "D_plus_B": {
+      "name": "Max Bar Length × Splice Strategy",
+      "effect": "threshold",
+      "reasoning": "max_long_NE (Cluster D) interacts with empalmar_siempre (Cluster B) at a threshold: when max_long_NE exceeds the typical span length, and empalmar_siempre=false, bars can run continuously through multiple spans — eliminating splices entirely for short-span buildings. Below the threshold, every span gets spliced regardless of the empalmar_siempre setting because the bar simply can't reach.",
+      "dimensions_amplified": ["material_cost", "piece_count"]
+    }
+  },
+
+  "dimension_correlation_notes": {
+    "description": "Some dimensions are naturally correlated and tend to move together.",
+
+    "positive_correlations": [
+      {
+        "dimensions": ["piece_count", "field_error_risk"],
+        "strength": "strong",
+        "reasoning": "More distinct pieces = more opportunities for errors. This is nearly universal."
+      },
+      {
+        "dimensions": ["field_error_risk", "inspection_complexity"],
+        "strength": "strong",
+        "reasoning": "Higher error risk means more things the inspector needs to check."
+      },
+      {
+        "dimensions": ["piece_count", "required_skill_level"],
+        "strength": "moderate",
+        "reasoning": "More bar types demand more reading, more identification, more drawing interpretation."
+      },
+      {
+        "dimensions": ["installation_speed", "drawing_clarity"],
+        "strength": "moderate",
+        "reasoning": "Clearer drawings reduce lookup time, which is a component of installation speed."
+      }
+    ],
+
+    "negative_correlations": [
+      {
+        "dimensions": ["material_cost", "piece_count"],
+        "strength": "strong",
+        "reasoning": "This is THE fundamental trade-off. Material optimization increases piece diversity. Simplification increases material waste. Nearly all parameter decisions negotiate this tension."
+      },
+      {
+        "dimensions": ["material_cost", "field_error_risk"],
+        "strength": "moderate",
+        "reasoning": "Lower material cost (more optimization) generally means tighter tolerances and more complex solutions, increasing error risk."
+      },
+      {
+        "dimensions": ["material_cost", "adaptability"],
+        "strength": "moderate",
+        "reasoning": "Optimized solutions have less built-in margin and are therefore less forgiving of field deviations."
+      }
+    ]
+  },
+
+  "agent_reasoning_rules": {
+    "description": "Derived rules the agent should apply when translating between NL and Config. These are the actionable output of the Impact Matrix.",
+
+    "nl_to_config_rules": [
+      {
+        "id": "R01",
+        "trigger_phrases_en": ["simple", "easy to build", "low complexity", "minimize errors", "basic crew", "straightforward"],
+        "trigger_phrases_es": ["simple", "fácil de construir", "baja complejidad", "minimizar errores", "cuadrilla básica", "sencillo"],
+        "target_dimensions": {"piece_count": "minimize", "field_error_risk": "minimize", "required_skill_level": "minimize", "installation_speed": "maximize"},
+        "cluster_directions": {
+          "A": "toward_simple",
+          "B": "toward_simple",
+          "C": "toward_simple",
+          "D": "toward_simple"
+                  },
+        "trade_off_to_disclose": "This will increase total steel weight by approximately 8-15% compared to an optimized solution."
+      },
+      {
+        "id": "R02",
+        "trigger_phrases_en": ["minimize cost", "least steel", "optimize material", "reduce weight", "economical"],
+        "trigger_phrases_es": ["minimizar costo", "menos acero", "optimizar material", "reducir peso", "económico"],
+        "target_dimensions": {"material_cost": "minimize"},
+        "cluster_directions": {
+          "A": "toward_optimized",
+          "B": "toward_optimized",
+          "C": "toward_optimized",
+          "D": "toward_optimized"
+                  },
+        "trade_off_to_disclose": "This will significantly increase piece count, field error risk, and required crew skill. Installation speed may drop 30-50%. Recommended only for projects with experienced crews and strong QA/QC programs."
+      },
+      {
+        "id": "R03",
+        "trigger_phrases_en": ["fast construction", "speed", "reduce schedule", "quick", "tight deadline"],
+        "trigger_phrases_es": ["construcción rápida", "velocidad", "reducir cronograma", "rápido", "plazo corto"],
+        "target_dimensions": {"installation_speed": "maximize"},
+        "cluster_directions": {
+          "A": "toward_simple",
+          "B": "toward_simple",
+          "C": "toward_simple",
+          "D": "toward_simple"
+                  },
+        "trade_off_to_disclose": "Maximizing speed has the same parameter profile as simplicity with strong emphasis on floor repetition and uniformity. Material cost increase is typically 10-20%."
+      },
+      {
+        "id": "R04",
+        "trigger_phrases_en": ["balanced", "reasonable", "standard practice", "typical", "normal"],
+        "trigger_phrases_es": ["balanceado", "razonable", "práctica estándar", "típico", "normal"],
+        "target_dimensions": {"material_cost": "moderate", "piece_count": "moderate", "field_error_risk": "moderate"},
+        "cluster_directions": {
+          "A": "balanced",
+          "B": "balanced",
+          "C": "balanced",
+          "D": "balanced"
+                  },
+        "trade_off_to_disclose": "Balanced configuration. No extreme trade-offs. Suitable for most projects with standard crews."
+      },
+      {
+        "id": "R05",
+        "trigger_phrases_en": ["minimize field errors", "low risk", "reliable", "robust", "forgiving", "safe construction"],
+        "trigger_phrases_es": ["minimizar errores en campo", "bajo riesgo", "confiable", "robusto", "tolerante", "construcción segura"],
+        "target_dimensions": {"field_error_risk": "minimize", "adaptability": "maximize"},
+        "cluster_directions": {
+          "A": "strongly_toward_simple",
+          "B": "strongly_toward_simple",
+          "C": "toward_simple",
+          "D": "toward_simple"
+                  },
+        "trade_off_to_disclose": "Maximum robustness. Steel weight will be 12-20% higher than balanced. Every floor identical, splices allowed everywhere, few bar types. The crew will find it hard to make mistakes."
+      },
+      {
+        "id": "R06",
+        "trigger_phrases_en": ["inexperienced crew", "new workers", "training", "first project"],
+        "trigger_phrases_es": ["cuadrilla sin experiencia", "trabajadores nuevos", "entrenamiento", "primer proyecto"],
+        "target_dimensions": {"required_skill_level": "minimize", "field_error_risk": "minimize"},
+        "cluster_directions": {
+          "A": "strongly_toward_simple",
+          "B": "strongly_toward_simple",
+          "C": "strongly_toward_simple",
+          "D": "toward_simple",
+          "E": "strongly_toward_simple",
+          "F": "maximize_clarity"
+        },
+        "trade_off_to_disclose": "Configuration designed for crew learning. Maximum repetition, minimum bar types, unrestricted splicing. Material cost premium ~15-20% but offset by lower labor cost (faster installation despite inexperience)."
+      },
+      {
+        "id": "R07",
+        "trigger_phrases_en": ["tall building", "high-rise", "many floors", "repetitive"],
+        "trigger_phrases_es": ["edificio alto", "rascacielos", "muchos pisos", "repetitivo"],
+        "target_dimensions": {"installation_speed": "maximize", "field_error_risk": "minimize"},
+        "cluster_directions": {
+          "A": "toward_simple",
+          "B": "toward_simple",
+          "C": "toward_simple",
+          "D": "toward_simple",
+          "E": "strongly_toward_simple",
+          "H": "consider_variable_fc_columns_only"
+        },
+        "trade_off_to_disclose": "For high-rises, floor repetition is the dominant factor. Uniform floors with possible concrete grade transitions at column groups every 5-8 floors is the typical optimal balance."
+      },
+      {
+        "id": "R08",
+        "trigger_phrases_en": ["save material but keep it manageable", "optimize but not too complex", "smart savings"],
+        "trigger_phrases_es": ["ahorrar material pero manejable", "optimizar sin complicar", "ahorro inteligente"],
+        "target_dimensions": {"material_cost": "reduce_moderately", "piece_count": "keep_moderate", "field_error_risk": "keep_moderate"},
+        "cluster_directions": {
+          "A": "balanced",
+          "B": "toward_optimized",
+          "C": "balanced",
+          "D": "balanced"
+                  },
+        "trade_off_to_disclose": "The highest-ROI savings come from splice optimization (Cluster B) because it reduces steel significantly with only moderate complexity increase. Combined with floor repetition, this gives 6-10% steel savings without dramatically increasing complexity."
+      },
+      {
+        "id": "R09",
+        "trigger_phrases_en": ["prefabrication", "off-site", "preassembly", "cage prefab"],
+        "trigger_phrases_es": ["prefabricación", "fuera de sitio", "preensamblaje", "jaulas prefabricadas"],
+        "target_dimensions": {"piece_count": "standardize", "installation_speed": "maximize"},
+        "cluster_directions": {
+          "A": "toward_simple",
+          "B": "toward_simple",
+          "C": "toward_simple",
+          "D": "strongly_toward_simple",
+          "E": "strongly_toward_simple",
+          "F": "inline"
+        },
+        "trade_off_to_disclose": "Prefabrication demands maximum standardization. All bars merged aggressively via coarse rounding, same configuration per floor. Drawing organization should be inline to match the prefab shop workflow."
+      },
+      {
+        "id": "R10",
+        "trigger_phrases_en": ["tight inspection", "strict QA", "government project", "essential facility", "critical building"],
+        "trigger_phrases_es": ["inspección estricta", "QA riguroso", "proyecto público", "edificio esencial", "edificio crítico"],
+        "target_dimensions": {"inspection_complexity": "minimize", "field_error_risk": "minimize"},
+        "cluster_directions": {
+          "A": "toward_simple",
+          "B": "toward_simple",
+          "C": "toward_simple",
+          "D": "toward_simple",
+          "E": "toward_simple",
+          "F": "maximize_clarity"
+        },
+        "trade_off_to_disclose": "Simplified configuration reduces inspection burden and non-conformance risk. Important for projects with third-party inspection or regulatory oversight."
+      }
+    ],
+
+    "config_to_nl_rules": [
+      {
+        "id": "NR01",
+        "condition": "cluster_A is near_simple",
+        "narrative_template": "This configuration prioritizes construction simplicity. The narrow bar range ({calibre_min_name} to {calibre_max_name}) means the crew works with only {n_bar_types} bar types, significantly reducing sorting and identification errors.",
+        "stakeholder_focus": "contractor, site_foreman"
+      },
+      {
+        "id": "NR02",
+        "condition": "cluster_A is near_optimized",
+        "narrative_template": "This configuration is heavily optimized for material efficiency. The wide bar range ({calibre_min_name} to {calibre_max_name}) with per-level variations produces a complex but steel-efficient solution. WARNING: This requires experienced crews, thorough QA/QC, and careful logistics planning. The cutting schedule will be extensive.",
+        "stakeholder_focus": "structural_engineer, cost_engineer"
+      },
+      {
+        "id": "NR03",
+        "condition": "empalmar_siempre is true AND zonas_empalme is todo",
+        "narrative_template": "Splicing is unrestricted — bars can be lapped anywhere along the span. This maximizes field flexibility and reduces splice positioning errors, at the cost of approximately {splice_excess_pct}% additional steel for lap material. Good choice for projects prioritizing construction speed over material optimization.",
+        "stakeholder_focus": "contractor, site_foreman"
+      },
+      {
+        "id": "NR04",
+        "condition": "cluster_A is near_simple AND cluster_B is near_optimized",
+        "narrative_template": "Interesting hybrid: the bar diversity is low (simple) but splice strategy is optimized. This means the crew works with few bar types (easy identification) but must position splices precisely in designated zones. This requires a crew that is disciplined about positioning but doesn't need to manage many bar sizes.",
+        "stakeholder_focus": "site_foreman"
+      },
+      {
+        "id": "NR05",
+        "condition": "long_homog is 2",
+        "narrative_template": "Aggressive bar standardization is active. All cutting lengths are rounded to 1.00m multiples (long_homog=2), meaning bars come out as 2.00m, 3.00m, 4.00m, etc. This drastically reduces the cutting schedule complexity — the crew will see many identical bars — but adds approximately {merging_waste_pct}% extra steel.",
+        "stakeholder_focus": "rebar_supplier, cost_engineer"
+      },
+      {
+        "id": "NR06",
+        "condition": "stirrup_range is narrow (min equals max)",
+        "narrative_template": "All stirrups use a single bar size ({stirrup_size_name}). This is the fastest possible stirrup configuration — the fabrication shop produces one type, the crew places one type. No sorting, no identification errors for transverse reinforcement.",
+        "stakeholder_focus": "contractor, rebar_fabricator"
+      },
+      {
+        "id": "NR07",
+        "condition": "filtro_por_nivel is active for any element",
+        "narrative_template": "Per-level overrides are active for {elements_with_overrides}. This means different floors will have different reinforcement configurations. The total drawing set will be larger, and the crew must verify they are using the correct floor's drawings at each level. Strong document control is essential.",
+        "stakeholder_focus": "project_manager, QA_inspector"
+      }
+    ]
+  }
+}

@@ -1,0 +1,1054 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "description": "ProDet Archetype Profiles — Complete parameter snapshots for 6 construction strategy archetypes. Each archetype provides concrete parameter values the agent uses as starting points when translating NL requests into config files. The agent selects the closest archetype, then adjusts individual parameters based on specific NL requirements.",
+    "author": "RDC Consultores / ProDet Agent System",
+    "date": "2026-02-27",
+    "companion_documents": [
+      "parameter_semantic_catalog.json",
+      "impact_matrix.json"
+    ],
+    "usage": "The agent loads these archetypes as few-shot anchors. When an NL request maps to a known pattern (e.g., 'simple construction'), the agent starts from that archetype and modifies only the parameters the specific request warrants. For Config→NL, the agent compares the input config against all archetypes to identify which it most resembles, then uses that archetype's narrative framing as a starting point.",
+    "notes": {
+      "template_basis": "All archetypes use the Mokara project.config structure. Parameters not listed here retain their Mokara values (code-mandated parameters, lookup tables, title block fields, etc.).",
+      "code_fixed_parameters": "Parameters in Cluster G (demanda, covers, strain limits) and lookup tables (long_ganchos, lon_tras, Ld, Ldh_concreto) are identical across all archetypes — they depend on the specific project, not the construction strategy."
+    }
+  },
+  "archetypes": {
+    "simple_robust": {
+      "id": "ARCH-01",
+      "name": "Simple / Robust",
+      "name_es": "Simple / Robusto",
+      "tagline": "Build it once, build it right, don't think twice.",
+      "tagline_es": "Constrúyalo una vez, constrúyalo bien, sin pensarlo dos veces.",
+      "description": {
+        "en": "Maximum constructability, minimum error risk, maximum field tolerance. Every floor is identical. Splices go anywhere. The crew works with 2-3 bar types total. Stirrups are uniform. The foreman barely needs to look at the drawings after the first floor. Accepts 12-20% more steel than a fully optimized solution — the premium buys speed, reliability, and peace of mind.",
+        "es": "Máxima constructabilidad, mínimo riesgo de error, máxima tolerancia en campo. Todos los pisos son iguales. Los empalmes van en cualquier lugar. La cuadrilla trabaja con 2-3 tipos de barra en total. Los estribos son uniformes. El maestro casi no necesita mirar los planos después del primer piso. Acepta 12-20% más acero que una solución totalmente optimizada — la prima compra velocidad, confiabilidad y tranquilidad."
+      },
+      "ideal_for": {
+        "en": [
+          "Projects prioritizing schedule certainty",
+          "Inexperienced or rotating crews",
+          "Remote sites with limited QA/QC",
+          "Buildings where rework cost exceeds material premium",
+          "Owner who values predictability over savings"
+        ],
+        "es": [
+          "Proyectos que priorizan certeza de cronograma",
+          "Cuadrillas sin experiencia o rotativas",
+          "Sitios remotos con QA/QC limitado",
+          "Edificios donde el costo de reproceso supera la prima de material",
+          "Propietario que valora la previsibilidad sobre el ahorro"
+        ]
+      },
+      "expected_outcomes": {
+        "material_cost_vs_balanced": "+8 to +15%",
+        "piece_count_vs_balanced": "-40 to -60%",
+        "field_error_risk": "very_low",
+        "installation_speed_vs_balanced": "+25 to +40% faster",
+        "required_skill_level": "basic (1-2 years experience)",
+        "drawing_clarity": "very_clear",
+        "inspection_complexity": "simple",
+        "adaptability": "very_forgiving"
+      },
+      "parameters": {
+        "cluster_A_bar_envelope": {
+          "vigas": {
+            "calibre_min": 4,
+            "calibre_max": 5,
+            "dif_max_cal": 1,
+            "dif_cal_unir_ppal": 2,
+            "dif_cal_unir_adic": 2,
+            "ref_primera_fila": {
+              "opcion": 2,
+              "cal_max_pf": 4
+            },
+            "calibre_ref_constr": 1
+          },
+          "nervios": {
+            "calibre_min": 1,
+            "calibre_max": 4,
+            "dif_max_cal": 2,
+            "dif_cal_unir_ppal": 2,
+            "dif_cal_unir_adic": 2,
+            "cal_bast": 0
+          },
+          "rationale": "Beams use only 3/4\" and 7/8\" — two bar types. Joists allow 3/8\" to 3/4\" with 2-step diversity. Aggressive merging (dif_cal_unir=2) further reduces distinct entries."
+        },
+        "cluster_B_splice_strategy": {
+          "vigas": {
+            "empalmar_siempre": true,
+            "zonas_empalme": {
+              "I": "todo",
+              "S": "todo"
+            },
+            "forzar_traslapo_GG": false,
+            "factor_tras_cra": 1.3,
+            "cabezas_ganchos": true,
+            "gan_vola": {
+              "S": 1,
+              "I": 1
+            },
+            "barra_alta": {
+              "castigo": 1,
+              "factor": 1.3
+            },
+            "dif_cal_refcont": 2
+          },
+          "rationale": "Always splice, splice anywhere, hooks on both cantilever faces. Maximum field freedom. No splice zone restrictions = zero positioning risk. dif_cal_refcont=2 allows aggressive merging of continuous bars."
+        },
+        "cluster_C_stirrups": {
+          "vigas": {
+            "calibre_est_ext_min": 1,
+            "calibre_est_ext_max": 1,
+            "calibre_est_int_min": 1,
+            "calibre_est_int_max": 1,
+            "resis_min": 0.5,
+            "soporte_zonas_conf": {
+              "opcion": 0,
+              "separacion": 0.15
+            }
+          },
+          "nervios": {
+            "calibre_est_ext_min": 0,
+            "calibre_est_ext_max": 0,
+            "calibre_est_int_min": 0,
+            "calibre_est_int_max": 0,
+            "resis_min": 0.5
+          },
+          "rationale": "Single stirrup size for beams: 3/8\" everywhere (ext min=max=1, int min=max=1). Joist stirrups: 1/4\" everywhere. One type per element category = fastest possible fabrication and zero stirrup identification errors."
+        },
+        "cluster_D_merging_tolerances": {
+          "vigas": {
+            "long_homog": 2,
+            "max_long_NE": 9.0,
+            "maxva": 6,
+            "ppal_2_lineas": false,
+            "lim_max_barras_capa": true,
+            "tras_conf": 60,
+            "new_cal_max_on_error": true,
+            "calibre_max_on_error": 6,
+            "redi_mom": false
+          },
+          "nervios": {
+            "long_homog": 2,
+            "max_long_NE": 9.0,
+            "maxva": 6,
+            "tol_ext": 1,
+            "empaq_N1L": 1,
+            "base_maxima_N1L": 14
+          },
+          "rationale": "long_homog=2 rounds all cutting lengths to 1.00m multiples (bars come out as 2.00m, 3.00m, 4.00m, etc.) — maximum standardization of the cutting schedule. max_long_NE=9.0m (standard 9m commercial bars, easier to handle than 10.5m). Only 6 variants evaluated — fast, picks the first good solution. Layer limits enforced to prevent congestion. Auto-error resolution enabled."
+        },
+        "cluster_F_drawings": {
+          "vigas": {
+            "tipo_diagramacion": "por_piso",
+            "apoyos_con_hatch": "C",
+            "cotas": "apoyos",
+            "rotular_planos": true
+          },
+          "rationale": "Auto-numbering enabled. Por_piso organization matches floor-by-floor construction."
+        }
+      }
+    },
+    "balanced": {
+      "id": "ARCH-02",
+      "name": "Balanced",
+      "name_es": "Balanceado",
+      "tagline": "Standard practice — no extremes, no surprises.",
+      "tagline_es": "Práctica estándar — sin extremos, sin sorpresas.",
+      "description": {
+        "en": "The middle ground that most experienced Colombian structural engineering firms produce. Moderate bar diversity, standard splice practice, reasonable merging tolerances. Neither wasteful nor overly complex. Suitable for most projects with standard crews and normal QA/QC programs.",
+        "es": "El punto medio que la mayoría de las firmas colombianas de ingeniería estructural producen. Diversidad moderada de barras, práctica estándar de empalme, tolerancias razonables de fusión. Ni derrochador ni excesivamente complejo. Adecuado para la mayoría de proyectos con cuadrillas estándar y programas normales de QA/QC."
+      },
+      "ideal_for": {
+        "en": [
+          "Standard residential and commercial projects",
+          "Crews with 3-5 years average experience",
+          "Projects with normal budget and schedule constraints",
+          "When no specific constructability priority has been defined"
+        ],
+        "es": [
+          "Proyectos residenciales y comerciales estándar",
+          "Cuadrillas con 3-5 años de experiencia promedio",
+          "Proyectos con restricciones normales de presupuesto y cronograma",
+          "Cuando no se ha definido una prioridad específica de constructabilidad"
+        ]
+      },
+      "expected_outcomes": {
+        "material_cost_vs_balanced": "baseline (0%)",
+        "piece_count_vs_balanced": "baseline",
+        "field_error_risk": "moderate",
+        "installation_speed_vs_balanced": "baseline",
+        "required_skill_level": "intermediate (3-5 years experience)",
+        "drawing_clarity": "moderate",
+        "inspection_complexity": "moderate",
+        "adaptability": "moderate"
+      },
+      "parameters": {
+        "cluster_A_bar_envelope": {
+          "vigas": {
+            "calibre_min": 3,
+            "calibre_max": 6,
+            "dif_max_cal": 2,
+            "dif_cal_unir_ppal": 1,
+            "dif_cal_unir_adic": 1,
+            "ref_primera_fila": {
+              "opcion": 2,
+              "cal_max_pf": 5
+            },
+            "calibre_ref_constr": 0
+          },
+          "nervios": {
+            "calibre_min": 1,
+            "calibre_max": 5,
+            "dif_max_cal": 3,
+            "dif_cal_unir_ppal": 1,
+            "dif_cal_unir_adic": 1,
+            "cal_bast": 0
+          },
+          "rationale": "Beams: 5/8\" to 1\" with 2-step diversity — 4 possible types, manageable. Joists: 3/8\" to 7/8\" with 3-step diversity — standard range. One-step merging keeps grouping moderate."
+        },
+        "cluster_B_splice_strategy": {
+          "vigas": {
+            "empalmar_siempre": true,
+            "zonas_empalme": {
+              "I": "todo",
+              "S": "todo"
+            },
+            "forzar_traslapo_GG": false,
+            "factor_tras_cra": 1.3,
+            "cabezas_ganchos": true,
+            "gan_vola": {
+              "S": 1,
+              "I": 0
+            },
+            "barra_alta": {
+              "castigo": 1,
+              "factor": 1.3
+            },
+            "dif_cal_refcont": 1
+          },
+          "rationale": "Always splice with unrestricted zones — the Colombian industry standard. Cantilever hooks on top only (standard). One-step continuous bar merging."
+        },
+        "cluster_C_stirrups": {
+          "vigas": {
+            "calibre_est_ext_min": 1,
+            "calibre_est_ext_max": 2,
+            "calibre_est_int_min": 1,
+            "calibre_est_int_max": 2,
+            "resis_min": 0.5,
+            "soporte_zonas_conf": {
+              "opcion": 0,
+              "separacion": 0.15
+            }
+          },
+          "nervios": {
+            "calibre_est_ext_min": 0,
+            "calibre_est_ext_max": 2,
+            "calibre_est_int_min": 0,
+            "calibre_est_int_max": 2,
+            "resis_min": 0.5
+          },
+          "rationale": "Two-size stirrup range (3/8\" and 1/2\") for beams — the industry standard. Joists allow 1/4\" to 1/2\". This gives the optimizer some flexibility without excessive stirrup types."
+        },
+        "cluster_D_merging_tolerances": {
+          "vigas": {
+            "long_homog": 1,
+            "max_long_NE": 10.5,
+            "maxva": 12,
+            "ppal_2_lineas": false,
+            "lim_max_barras_capa": false,
+            "tras_conf": 60,
+            "new_cal_max_on_error": true,
+            "calibre_max_on_error": 7,
+            "redi_mom": false
+          },
+          "nervios": {
+            "long_homog": 1,
+            "max_long_NE": 10.5,
+            "maxva": 12,
+            "tol_ext": 1,
+            "empaq_N1L": 1,
+            "base_maxima_N1L": 14
+          },
+          "rationale": "Moderate merging: 0.3m top / 1.0m bottom. long_homog=1 rounds cutting lengths to 0.50m multiples — the standard Colombian practice (bars come out as 1.50m, 2.00m, 2.50m, etc.). Standard 10.5m commercial bar length. 12 variants evaluated — reasonable search depth. No layer limits, no moment redistribution."
+        },
+        "cluster_F_drawings": {
+          "vigas": {
+            "tipo_diagramacion": "por_piso",
+            "apoyos_con_hatch": "C",
+            "cotas": "apoyos",
+            "rotular_planos": false
+          },
+          "rationale": "Standard 1:300 scale, por_piso organization. Manual drawing numbering (rotular_planos=false) for firm-specific conventions."
+        }
+      }
+    },
+    "cost_optimized": {
+      "id": "ARCH-03",
+      "name": "Cost-Optimized",
+      "name_es": "Optimizado en Costo",
+      "tagline": "Every bar earns its keep.",
+      "tagline_es": "Cada barra justifica su existencia.",
+      "description": {
+        "en": "Maximum material efficiency. Wide bar range, restricted splice zones, low merging tolerances, per-level optimization where beneficial. The detailing engine has full freedom to minimize steel weight. Produces complex but structurally efficient solutions. Requires experienced crews, rigorous QA/QC, and strong logistics management. Not for the faint of heart.",
+        "es": "Máxima eficiencia de material. Rango amplio de barras, zonas de empalme restringidas, tolerancias de fusión bajas, optimización por nivel donde sea beneficioso. El motor de despiece tiene plena libertad para minimizar el peso del acero. Produce soluciones complejas pero estructuralmente eficientes. Requiere cuadrillas experimentadas, QA/QC riguroso y gestión logística sólida. No es para los de poco corazón."
+      },
+      "ideal_for": {
+        "en": [
+          "Projects where steel cost dominates the budget",
+          "Experienced contractor with skilled ironworkers (5+ years)",
+          "Strong QA/QC program with dedicated inspectors",
+          "Low-rise buildings where logistics complexity is manageable",
+          "Markets with high steel prices relative to labor"
+        ],
+        "es": [
+          "Proyectos donde el costo del acero domina el presupuesto",
+          "Contratista experimentado con fierreros calificados (5+ años)",
+          "Programa de QA/QC fuerte con inspectores dedicados",
+          "Edificios de baja altura donde la complejidad logística es manejable",
+          "Mercados con precios altos de acero relativo a la mano de obra"
+        ]
+      },
+      "expected_outcomes": {
+        "material_cost_vs_balanced": "-8 to -15%",
+        "piece_count_vs_balanced": "+60 to +120%",
+        "field_error_risk": "high",
+        "installation_speed_vs_balanced": "-25 to -40% slower",
+        "required_skill_level": "advanced (5+ years experience)",
+        "drawing_clarity": "dense",
+        "inspection_complexity": "complex",
+        "adaptability": "tight"
+      },
+      "parameters": {
+        "cluster_A_bar_envelope": {
+          "vigas": {
+            "calibre_min": 2,
+            "calibre_max": 7,
+            "dif_max_cal": 3,
+            "dif_cal_unir_ppal": 0,
+            "dif_cal_unir_adic": 0,
+            "ref_primera_fila": {
+              "opcion": 0,
+              "cal_max_pf": 6
+            },
+            "calibre_ref_constr": 0
+          },
+          "nervios": {
+            "calibre_min": 0,
+            "calibre_max": 6,
+            "dif_max_cal": 4,
+            "dif_cal_unir_ppal": 0,
+            "dif_cal_unir_adic": 0,
+            "cal_bast": 0
+          },
+          "rationale": "Maximum bar range: 1/2\" to 1-1/4\" for beams, 1/4\" to 1\" for joists. 3-4 step diversity, zero merging — every bar is exactly what's needed. No first-layer constraint — optimizer decides freely."
+        },
+        "cluster_B_splice_strategy": {
+          "vigas": {
+            "empalmar_siempre": false,
+            "zonas_empalme": {
+              "I": "centro",
+              "S": "centro"
+            },
+            "forzar_traslapo_GG": true,
+            "factor_tras_cra": 1.3,
+            "cabezas_ganchos": true,
+            "gan_vola": {
+              "S": 1,
+              "I": 0
+            },
+            "barra_alta": {
+              "castigo": 1,
+              "factor": 1.3
+            },
+            "dif_cal_refcont": 0
+          },
+          "rationale": "Allow continuous bars (empalmar_siempre=false). Splices restricted to midspan zones (Class A splices — shorter lengths). Force lap splices for large bars (avoids expensive hook fabrication on ≥1\" bars). Zero continuous bar merging — exact sizing."
+        },
+        "cluster_C_stirrups": {
+          "vigas": {
+            "calibre_est_ext_min": 1,
+            "calibre_est_ext_max": 2,
+            "calibre_est_int_min": 1,
+            "calibre_est_int_max": 2,
+            "resis_min": 0.5,
+            "soporte_zonas_conf": {
+              "opcion": 1,
+              "separacion": 0.1
+            }
+          },
+          "nervios": {
+            "calibre_est_ext_min": 0,
+            "calibre_est_ext_max": 2,
+            "calibre_est_int_min": 0,
+            "calibre_est_int_max": 2,
+            "resis_min": 0.5
+          },
+          "rationale": "Wide stirrup size range (1/4\" to 1/2\"). Lower minimums (3 stirrups, 7.5cm spacing). Active confinement zones with 10cm spacing. Optimizer picks the minimum stirrup for each demand zone."
+        },
+        "cluster_D_merging_tolerances": {
+          "vigas": {
+            "long_homog": 0,
+            "max_long_NE": 12.0,
+            "maxva": 12,
+            "ppal_2_lineas": true,
+            "lim_max_barras_capa": false,
+            "tras_conf": 60,
+            "new_cal_max_on_error": false,
+            "calibre_max_on_error": 8,
+            "redi_mom": true
+          },
+          "nervios": {
+            "long_homog": 0,
+            "max_long_NE": 12.0,
+            "maxva": 12,
+            "tol_ext": 0.5,
+            "empaq_N1L": 1,
+            "base_maxima_N1L": 14
+          },
+          "rationale": "Minimal merging: 0.1m top / 0.3m bottom. long_homog=0 rounds cutting lengths to only 0.10m multiples — finest granularity, minimum waste per bar, but produces many distinct lengths on the cutting schedule. 12m max bar (requires special ordering in Colombia). 24 variants evaluated — deep optimization. Mid-span hooks and two-layer principal bars enabled. Moment redistribution active — reduces peak reinforcement at supports. Error auto-resolution disabled — engineer reviews manually."
+        },
+        "cluster_F_drawings": {
+          "vigas": {
+            "tipo_diagramacion": "por_piso",
+            "apoyos_con_hatch": "C",
+            "cotas": "apoyos",
+            "rotular_planos": true
+          },
+          "rationale": "Standard scale for elevations but larger scale (1:200) for cross-sections to handle the denser annotation. Auto-numbering to manage the larger drawing set."
+        },
+        "interaction_warning": "This archetype uses the widest bar range and finest merging tolerances. The agent should flag the B×D compounding interaction (restricted splices + low merging tolerance) and recommend that the crew has strong QA/QC to handle the complexity."
+      }
+    },
+    "high_rise_repetitive": {
+      "id": "ARCH-04",
+      "name": "High-Rise Repetitive",
+      "name_es": "Edificio Alto Repetitivo",
+      "tagline": "Learn the floor once, build it twenty-five times.",
+      "tagline_es": "Aprenda el piso una vez, constrúyalo veinticinco veces.",
+      "description": {
+        "en": "Specifically tuned for buildings with 15+ floors where construction speed depends overwhelmingly on floor-to-floor repetition. The crew's learning curve is the dominant productivity factor. All beam and joist parameters are uniform across floors. Column concrete may step down in groups of 5-8 floors (the only per-level variation). Bar diversity is kept moderate — enough for reasonable optimization within each floor but not so wide that sorting becomes a bottleneck.",
+        "es": "Específicamente calibrado para edificios de 15+ pisos donde la velocidad de construcción depende abrumadoramente de la repetición piso a piso. La curva de aprendizaje de la cuadrilla es el factor dominante de productividad. Todos los parámetros de vigas y nervios son uniformes en todos los pisos. El concreto de columnas puede escalonarse en grupos de 5-8 pisos (la única variación por nivel). La diversidad de barras se mantiene moderada — suficiente para una optimización razonable dentro de cada piso pero no tan amplia que la clasificación se vuelva un cuello de botella."
+      },
+      "ideal_for": {
+        "en": [
+          "Residential towers 15-40 floors",
+          "Commercial towers with repetitive floor plates",
+          "Projects with aggressive schedule targets",
+          "Markets where labor productivity drives profitability",
+          "Typical Medellín / Bogotá high-rise construction"
+        ],
+        "es": [
+          "Torres residenciales de 15-40 pisos",
+          "Torres comerciales con plantas tipo repetitivas",
+          "Proyectos con metas agresivas de cronograma",
+          "Mercados donde la productividad laboral impulsa la rentabilidad",
+          "Construcción típica de edificios altos en Medellín / Bogotá"
+        ]
+      },
+      "expected_outcomes": {
+        "material_cost_vs_balanced": "+3 to +8%",
+        "piece_count_vs_balanced": "-20 to -35%",
+        "field_error_risk": "low",
+        "installation_speed_vs_balanced": "+30 to +50% faster (learning curve effect compounds with floors)",
+        "required_skill_level": "intermediate (3-4 years experience, fast after floor 3)",
+        "drawing_clarity": "clear",
+        "inspection_complexity": "simple (inspector learns pattern once)",
+        "adaptability": "forgiving"
+      },
+      "parameters": {
+        "cluster_A_bar_envelope": {
+          "vigas": {
+            "calibre_min": 3,
+            "calibre_max": 5,
+            "dif_max_cal": 2,
+            "dif_cal_unir_ppal": 1,
+            "dif_cal_unir_adic": 1,
+            "ref_primera_fila": {
+              "opcion": 2,
+              "cal_max_pf": 4
+            },
+            "calibre_ref_constr": 0
+          },
+          "nervios": {
+            "calibre_min": 1,
+            "calibre_max": 4,
+            "dif_max_cal": 2,
+            "dif_cal_unir_ppal": 1,
+            "dif_cal_unir_adic": 1,
+            "cal_bast": 0
+          },
+          "rationale": "Moderate-narrow range: 5/8\" to 7/8\" for beams (3 possible types), 3/8\" to 3/4\" for joists. 2-step diversity limit keeps identification easy. The crew memorizes which beams get which bars by floor 3."
+        },
+        "cluster_B_splice_strategy": {
+          "vigas": {
+            "empalmar_siempre": true,
+            "zonas_empalme": {
+              "I": "todo",
+              "S": "todo"
+            },
+            "forzar_traslapo_GG": false,
+            "factor_tras_cra": 1.3,
+            "cabezas_ganchos": true,
+            "gan_vola": {
+              "S": 1,
+              "I": 0
+            },
+            "barra_alta": {
+              "castigo": 1,
+              "factor": 1.3
+            },
+            "dif_cal_refcont": 1
+          },
+          "rationale": "Simple splice strategy — always splice, anywhere. This is especially important for high-rises because the crew develops a muscle-memory rhythm for bar placement, and splice flexibility lets them maintain that rhythm without stopping to measure splice positions."
+        },
+        "cluster_C_stirrups": {
+          "vigas": {
+            "calibre_est_ext_min": 1,
+            "calibre_est_ext_max": 2,
+            "calibre_est_int_min": 1,
+            "calibre_est_int_max": 1,
+            "resis_min": 0.5,
+            "soporte_zonas_conf": {
+              "opcion": 0,
+              "separacion": 0.15
+            }
+          },
+          "nervios": {
+            "calibre_est_ext_min": 0,
+            "calibre_est_ext_max": 1,
+            "calibre_est_int_min": 0,
+            "calibre_est_int_max": 1,
+            "resis_min": 0.5
+          },
+          "rationale": "External beam stirrups: 3/8\" or 1/2\" (2 types). Internal beam stirrups: 3/8\" only (1 type). Joist stirrups: 1/4\" or 3/8\" (2 types). This is a compromise — enough range for the optimizer to handle varying shear demands without excessive types."
+        },
+        "cluster_D_merging_tolerances": {
+          "vigas": {
+            "long_homog": 1,
+            "max_long_NE": 10.5,
+            "maxva": 10,
+            "ppal_2_lineas": false,
+            "lim_max_barras_capa": false,
+            "tras_conf": 60,
+            "new_cal_max_on_error": true,
+            "calibre_max_on_error": 6,
+            "redi_mom": false
+          },
+          "nervios": {
+            "long_homog": 1,
+            "max_long_NE": 10.5,
+            "maxva": 10,
+            "tol_ext": 1,
+            "empaq_N1L": 1,
+            "base_maxima_N1L": 14
+          },
+          "rationale": "Moderately aggressive merging (slightly more than Balanced in long_homog-based merging). long_homog=1 rounds cutting lengths to 0.50m multiples — standard practice. Standard 10.5m commercial bar. The key goal is maximizing the number of identical bar entries across the floor."
+        },
+        "cluster_F_drawings": {
+          "vigas": {
+            "tipo_diagramacion": "por_piso",
+            "apoyos_con_hatch": "C",
+            "cotas": "apoyos",
+            "rotular_planos": true
+          },
+          "rationale": "Standard scale. Auto-numbered. The drawing set is compact because most floors reference the same 'typical floor' sheets."
+        }
+      }
+    },
+    "speed_focused": {
+      "id": "ARCH-05",
+      "name": "Speed-Focused",
+      "name_es": "Enfocado en Velocidad",
+      "tagline": "The crane doesn't wait.",
+      "tagline_es": "La grúa no espera.",
+      "description": {
+        "en": "Everything is subordinated to minimizing rebar installation time per floor. This goes beyond Simple/Robust by accepting even more material waste in exchange for the fastest possible installation. Extremely narrow bar range (close to a single bar type per element category), maximum merging, maximum homogenization, and the simplest possible stirrup schedule. Designed for projects where the critical path runs through rebar installation and every day saved is worth more than the extra steel.",
+        "es": "Todo se subordina a minimizar el tiempo de instalación de refuerzo por piso. Va más allá de Simple/Robusto al aceptar aún más desperdicio de material a cambio de la instalación más rápida posible. Rango de barras extremadamente estrecho (cercano a un solo tipo de barra por categoría de elemento), fusión máxima, homogenización máxima, y el esquema de estribos más simple posible. Diseñado para proyectos donde la ruta crítica pasa por la instalación de refuerzo y cada día ahorrado vale más que el acero extra."
+      },
+      "ideal_for": {
+        "en": [
+          "Projects with liquidated damages for schedule delays",
+          "Fast-track construction where rebar is on the critical path",
+          "Projects with limited crane time windows",
+          "Disaster recovery or emergency construction",
+          "Any project where time value exceeds steel cost premium"
+        ],
+        "es": [
+          "Proyectos con multas por atraso en cronograma",
+          "Construcción fast-track donde el refuerzo está en la ruta crítica",
+          "Proyectos con ventanas limitadas de tiempo de grúa",
+          "Recuperación de desastres o construcción de emergencia",
+          "Cualquier proyecto donde el valor del tiempo supera la prima de acero"
+        ]
+      },
+      "expected_outcomes": {
+        "material_cost_vs_balanced": "+15 to +25%",
+        "piece_count_vs_balanced": "-50 to -70%",
+        "field_error_risk": "very_low",
+        "installation_speed_vs_balanced": "+40 to +60% faster",
+        "required_skill_level": "basic (even new workers can execute)",
+        "drawing_clarity": "very_clear (almost nothing to read)",
+        "inspection_complexity": "very_simple",
+        "adaptability": "very_forgiving"
+      },
+      "parameters": {
+        "cluster_A_bar_envelope": {
+          "vigas": {
+            "calibre_min": 4,
+            "calibre_max": 5,
+            "dif_max_cal": 1,
+            "dif_cal_unir_ppal": 2,
+            "dif_cal_unir_adic": 2,
+            "ref_primera_fila": {
+              "opcion": 2,
+              "cal_max_pf": 4
+            },
+            "calibre_ref_constr": 1
+          },
+          "nervios": {
+            "calibre_min": 2,
+            "calibre_max": 3,
+            "dif_max_cal": 1,
+            "dif_cal_unir_ppal": 2,
+            "dif_cal_unir_adic": 2,
+            "cal_bast": 2
+          },
+          "rationale": "Extreme narrowing. Beams: 3/4\" and 7/8\" only. Joists: 1/2\" and 5/8\" only. Maximum merging (2-step) groups almost everything into a single bar type per element. Constructive rebar at 3/8\" (stiffer, faster to handle). Joist bastones forced to 1/2\" for uniformity."
+        },
+        "cluster_B_splice_strategy": {
+          "vigas": {
+            "empalmar_siempre": true,
+            "zonas_empalme": {
+              "I": "todo",
+              "S": "todo"
+            },
+            "forzar_traslapo_GG": false,
+            "factor_tras_cra": 1.3,
+            "cabezas_ganchos": true,
+            "gan_vola": {
+              "S": 1,
+              "I": 1
+            },
+            "barra_alta": {
+              "castigo": 1,
+              "factor": 1.3
+            },
+            "dif_cal_refcont": 2
+          },
+          "rationale": "Identical to Simple/Robust but with even more aggressive continuous bar merging (dif_cal_refcont=2). Hooks on both cantilever faces to eliminate any ambiguity. The crew never has to think about splice positioning."
+        },
+        "cluster_C_stirrups": {
+          "vigas": {
+            "calibre_est_ext_min": 1,
+            "calibre_est_ext_max": 1,
+            "calibre_est_int_min": 1,
+            "calibre_est_int_max": 1,
+            "resis_min": 0.5,
+            "soporte_zonas_conf": {
+              "opcion": 0,
+              "separacion": 0.15
+            }
+          },
+          "nervios": {
+            "calibre_est_ext_min": 0,
+            "calibre_est_ext_max": 0,
+            "calibre_est_int_min": 0,
+            "calibre_est_int_max": 0,
+            "resis_min": 0.5
+          },
+          "rationale": "Absolutely uniform stirrups. Beams: 3/8\" everywhere (single type). Joists: 1/4\" everywhere (single type). The fabrication shop produces one shape per element category. Workers tie them with their eyes closed by day 2."
+        },
+        "cluster_D_merging_tolerances": {
+          "vigas": {
+            "long_homog": 2,
+            "max_long_NE": 9.0,
+            "maxva": 4,
+            "ppal_2_lineas": false,
+            "lim_max_barras_capa": true,
+            "tras_conf": 60,
+            "new_cal_max_on_error": true,
+            "calibre_max_on_error": 6,
+            "redi_mom": false
+          },
+          "nervios": {
+            "long_homog": 2,
+            "max_long_NE": 9.0,
+            "maxva": 4,
+            "tol_ext": 1.5,
+            "empaq_N1L": 1,
+            "base_maxima_N1L": 14
+          },
+          "rationale": "Maximum merging. 0.8m top / 2.0m bottom tolerance means bars up to 2m different in length get unified. long_homog=2 rounds all cutting lengths to 1.00m multiples — maximum rounding, fewest possible distinct lengths. 9.0m max bar for easy handling. Only 4 variants — takes the first reasonable solution. 2 text layers — minimal annotation. Layer limits enforced for clear section layout."
+        },
+        "cluster_F_drawings": {
+          "vigas": {
+            "tipo_diagramacion": "por_piso",
+            "apoyos_con_hatch": "C",
+            "cotas": "apoyos",
+            "rotular_planos": true
+          },
+          "rationale": "Largest practical scale (1:200) for instant readability. The drawing set is tiny — perhaps 3-5 sheets for the entire building of beams."
+        }
+      }
+    },
+    "prefab_ready": {
+      "id": "ARCH-06",
+      "name": "Prefab-Ready",
+      "name_es": "Listo para Prefabricación",
+      "tagline": "The cage arrives complete.",
+      "tagline_es": "La jaula llega completa.",
+      "description": {
+        "en": "Maximum standardization for off-site rebar cage prefabrication. Every beam of the same cross-section gets identical reinforcement regardless of demand variations. Bars are cut to standard lengths that match the prefab shop's cutting table. Stirrups are pre-bent to a single specification. The goal is to produce cages in a factory setting and deliver them to site as complete assemblies — the crew's job is only crane-lift and tie-in, not bar-by-bar placement.",
+        "es": "Máxima estandarización para prefabricación de jaulas de refuerzo fuera del sitio. Cada viga de la misma sección transversal recibe refuerzo idéntico sin importar las variaciones de demanda. Las barras se cortan a longitudes estándar que coinciden con la mesa de corte del taller. Los estribos se pre-doblan a una sola especificación. El objetivo es producir jaulas en un ambiente de fábrica y entregarlas al sitio como ensamblajes completos — el trabajo de la cuadrilla es solo izar con grúa y amarrar, no colocar barra por barra."
+      },
+      "ideal_for": {
+        "en": [
+          "Projects using rebar cage prefabrication",
+          "Industrial buildings with repetitive elements",
+          "Sites with limited space for on-site rebar work",
+          "Projects using BIM-to-fabrication digital workflows",
+          "Any project where factory quality exceeds site quality"
+        ],
+        "es": [
+          "Proyectos usando prefabricación de jaulas de refuerzo",
+          "Edificios industriales con elementos repetitivos",
+          "Sitios con espacio limitado para trabajo de refuerzo",
+          "Proyectos usando flujos digitales BIM-a-fabricación",
+          "Cualquier proyecto donde la calidad de fábrica supera la calidad de sitio"
+        ]
+      },
+      "expected_outcomes": {
+        "material_cost_vs_balanced": "+12 to +20%",
+        "piece_count_vs_balanced": "-60 to -80%",
+        "field_error_risk": "very_low (quality controlled in factory)",
+        "installation_speed_vs_balanced": "+50 to +70% faster on site (cage placement vs bar-by-bar)",
+        "required_skill_level": "basic on site (crane operators + tiers), advanced in factory",
+        "drawing_clarity": "specialized (inline format for factory)",
+        "inspection_complexity": "simple on site, detailed in factory",
+        "adaptability": "very_low (cages are rigid, field modifications nearly impossible)"
+      },
+      "parameters": {
+        "cluster_A_bar_envelope": {
+          "vigas": {
+            "calibre_min": 4,
+            "calibre_max": 5,
+            "dif_max_cal": 1,
+            "dif_cal_unir_ppal": 2,
+            "dif_cal_unir_adic": 2,
+            "ref_primera_fila": {
+              "opcion": 2,
+              "cal_max_pf": 4
+            },
+            "calibre_ref_constr": 1
+          },
+          "nervios": {
+            "calibre_min": 2,
+            "calibre_max": 3,
+            "dif_max_cal": 1,
+            "dif_cal_unir_ppal": 2,
+            "dif_cal_unir_adic": 2,
+            "cal_bast": 2
+          },
+          "rationale": "Same as Speed-Focused. Narrow range for maximum standardization. The prefab shop benefits from batch production of identical bar types."
+        },
+        "cluster_B_splice_strategy": {
+          "vigas": {
+            "empalmar_siempre": true,
+            "zonas_empalme": {
+              "I": "todo",
+              "S": "todo"
+            },
+            "forzar_traslapo_GG": false,
+            "factor_tras_cra": 1.3,
+            "cabezas_ganchos": true,
+            "gan_vola": {
+              "S": 1,
+              "I": 1
+            },
+            "barra_alta": {
+              "castigo": 1,
+              "factor": 1.3
+            },
+            "dif_cal_refcont": 2
+          },
+          "rationale": "Always splice — each cage contains bars for one span only. Cages connect at supports via lap splices. Unrestricted zones because splice positioning is factory-controlled."
+        },
+        "cluster_C_stirrups": {
+          "vigas": {
+            "calibre_est_ext_min": 1,
+            "calibre_est_ext_max": 1,
+            "calibre_est_int_min": 1,
+            "calibre_est_int_max": 1,
+            "resis_min": 0.5,
+            "soporte_zonas_conf": {
+              "opcion": 0,
+              "separacion": 0.15
+            }
+          },
+          "nervios": {
+            "calibre_est_ext_min": 0,
+            "calibre_est_ext_max": 0,
+            "calibre_est_int_min": 0,
+            "calibre_est_int_max": 0,
+            "resis_min": 0.5
+          },
+          "rationale": "Single stirrup size per element category — critical for prefab. The bending machine is set once and produces all stirrups for the entire project. No sorting, no selection."
+        },
+        "cluster_D_merging_tolerances": {
+          "vigas": {
+            "long_homog": 2,
+            "max_long_NE": 9.0,
+            "maxva": 4,
+            "ppal_2_lineas": false,
+            "lim_max_barras_capa": true,
+            "tras_conf": 60,
+            "new_cal_max_on_error": true,
+            "calibre_max_on_error": 6,
+            "redi_mom": false
+          },
+          "nervios": {
+            "long_homog": 2,
+            "max_long_NE": 9.0,
+            "maxva": 4,
+            "tol_ext": 2.0,
+            "empaq_N1L": 1,
+            "base_maxima_N1L": 14
+          },
+          "rationale": "Most aggressive merging of all archetypes. 1.0m/2.0m tolerances and long_homog=2 (1.00m rounding) — all cutting lengths snap to full meters. 9.0m bars for factory handling. The goal is to produce as few UNIQUE cage types as possible. A 25-story building might need only 10-15 unique beam cage designs for 300+ beam instances."
+        },
+        "cluster_F_drawings": {
+          "vigas": {
+            "tipo_diagramacion": "inline",
+            "apoyos_con_hatch": "C",
+            "cotas": "apoyos",
+            "rotular_planos": true
+          },
+          "rationale": "POR_VIGA organization — each beam type gets its own sheet, which becomes the factory work order. This is the key drawing difference for prefab: the factory needs per-element instructions, not per-floor layouts. Larger scale for factory workers to read at the bending table."
+        }
+      }
+    }
+  },
+  "archetype_comparison_matrix": {
+    "description": "Side-by-side comparison of key parameters across all 6 archetypes for quick reference.",
+    "cluster_A_key_params": {
+      "header": [
+        "Parameter",
+        "Simple",
+        "Balanced",
+        "Cost-Opt",
+        "High-Rise",
+        "Speed",
+        "Prefab"
+      ],
+      "calibre_min_vigas": [
+        4,
+        3,
+        2,
+        3,
+        4,
+        4
+      ],
+      "calibre_max_vigas": [
+        5,
+        6,
+        7,
+        5,
+        5,
+        5
+      ],
+      "dif_max_cal_vigas": [
+        1,
+        2,
+        3,
+        2,
+        1,
+        1
+      ],
+      "dif_cal_unir_ppal": [
+        2,
+        1,
+        0,
+        1,
+        2,
+        2
+      ]
+    },
+    "cluster_B_key_params": {
+      "header": [
+        "Parameter",
+        "Simple",
+        "Balanced",
+        "Cost-Opt",
+        "High-Rise",
+        "Speed",
+        "Prefab"
+      ],
+      "empalmar_siempre": [
+        true,
+        true,
+        false,
+        true,
+        true,
+        true
+      ],
+      "zonas_empalme_I": [
+        "todo",
+        "todo",
+        "centro",
+        "todo",
+        "todo",
+        "todo"
+      ],
+      "zonas_empalme_S": [
+        "todo",
+        "todo",
+        "centro",
+        "todo",
+        "todo",
+        "todo"
+      ]
+    },
+    "cluster_C_key_params": {
+      "header": [
+        "Parameter",
+        "Simple",
+        "Balanced",
+        "Cost-Opt",
+        "High-Rise",
+        "Speed",
+        "Prefab"
+      ],
+      "est_ext_range": [
+        "1-1",
+        "1-2",
+        "1-2",
+        "1-2",
+        "1-1",
+        "1-1"
+      ],
+      "est_int_range": [
+        "1-1",
+        "1-2",
+        "1-2",
+        "1-1",
+        "1-1",
+        "1-1"
+      ]
+    },
+    "cluster_D_key_params": {
+      "header": [
+        "Parameter",
+        "Simple",
+        "Balanced",
+        "Cost-Opt",
+        "High-Rise",
+        "Speed",
+        "Prefab"
+      ],
+      "long_homog": [
+        2,
+        1,
+        0,
+        1,
+        2,
+        2
+      ],
+      "max_long_NE": [
+        9.0,
+        10.5,
+        12.0,
+        10.5,
+        9.0,
+        9.0
+      ],
+      "maxva": [
+        6,
+        12,
+        24,
+        10,
+        4,
+        4
+      ]
+    },
+    "cluster_F_key_params": {
+      "header": [
+        "Parameter",
+        "Simple",
+        "Balanced",
+        "Cost-Opt",
+        "High-Rise",
+        "Speed",
+        "Prefab"
+      ],
+      "tipo_diagramacion": [
+        "por_piso",
+        "por_piso",
+        "por_piso",
+        "por_piso",
+        "por_piso",
+        "inline"
+      ]
+    }
+  },
+  "archetype_selection_guide": {
+    "description": "Decision tree the agent uses to select the best starting archetype from an NL request.",
+    "primary_signals": [
+      {
+        "signal": "Engineer mentions speed, schedule, deadline, fast-track, crane time",
+        "archetype": "speed_focused",
+        "confidence": "high"
+      },
+      {
+        "signal": "Engineer mentions cost, budget, minimize steel, economical, weight",
+        "archetype": "cost_optimized",
+        "confidence": "high"
+      },
+      {
+        "signal": "Engineer mentions simple, easy, errors, inexperienced, reliable, robust",
+        "archetype": "simple_robust",
+        "confidence": "high"
+      },
+      {
+        "signal": "Engineer mentions prefab, cage, factory, off-site, preassembly",
+        "archetype": "prefab_ready",
+        "confidence": "high"
+      },
+      {
+        "signal": "Engineer mentions tall building, high-rise, tower, 15+ floors, repetitive",
+        "archetype": "high_rise_repetitive",
+        "confidence": "high"
+      },
+      {
+        "signal": "Engineer mentions balanced, standard, typical, normal, no specific priority",
+        "archetype": "balanced",
+        "confidence": "high"
+      },
+      {
+        "signal": "Engineer mentions conflicting priorities (e.g., 'cheap AND simple')",
+        "archetype": "balanced",
+        "confidence": "medium",
+        "note": "Start from balanced and adjust the most-mentioned priority direction"
+      }
+    ],
+    "secondary_adjustments": [
+      {
+        "condition": "NL mentions a specific cluster concern on top of the primary archetype",
+        "action": "Start from the selected archetype and adjust only the relevant cluster's parameters",
+        "example": "Engineer says 'fast construction but I want to optimize splices' → Start from speed_focused, adjust only Cluster B toward optimized"
+      },
+      {
+        "condition": "NL mentions a specific constraint (e.g., 'crew only has 2 years experience')",
+        "action": "Override the skill-related parameters (Clusters A, B toward Simple) regardless of archetype",
+        "example": "Engineer says 'optimize cost but crew is inexperienced' → Start from cost_optimized but move A toward Simple to compensate"
+      },
+      {
+        "condition": "NL mentions building height",
+        "action": "If >15 floors and selected archetype is not high_rise_repetitive, recommend floor grouping and uniform floor-to-floor treatment",
+        "example": "Engineer says 'optimize cost for a 30-story tower' → Start from cost_optimized but recommend floor grouping for repetition gains"
+      }
+    ]
+  }
+}

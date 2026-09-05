@@ -43,6 +43,68 @@ logger = logging.getLogger(__name__)
 # Constants
 # =============================================================================
 
+def _variant_suffix(output_dir: str) -> str:
+    """Extract the variant suffix from an output directory name.
+
+    Given 'projects/mokara_emp_mecanicos', returns '_emp_mecanicos'.
+    Given 'projects/mokara', returns ''.
+    """
+    from paths import base_project_name
+    folder = os.path.basename(output_dir)
+    base = base_project_name(folder)
+    if folder != base and folder.startswith(base):
+        return folder[len(base):]
+    return ""
+
+
+def _stamp_variant_identity(config: dict, output_dir: str, source_dir: str) -> None:
+    """Update 'name' and 'nombre_inf' so ProDet can distinguish this variant.
+
+    Only modifies the fields when writing to a different directory than the source.
+    Appends the variant suffix (e.g. '_emp_mecanicos') to the existing 'name',
+    and adds it in parentheses to 'nombre_inf'.
+    """
+    if os.path.normpath(output_dir) == os.path.normpath(source_dir):
+        return
+
+    suffix = _variant_suffix(output_dir)
+    if not suffix:
+        return
+
+    # Update 'name' (ProDet internal ID, e.g. "DMO_MOK" → "DMO_MOK_emp_mecanicos")
+    old_name = config.get("name", "")
+    if old_name and not old_name.endswith(suffix):
+        config["name"] = old_name + suffix
+
+    # Update 'nombre_inf' (display name, e.g. "Ejemplo Mokara" → "Ejemplo Mokara (emp_mecanicos)")
+    old_inf = config.get("nombre_inf", "")
+    tag = suffix.lstrip("_")
+    if old_inf and tag not in old_inf:
+        config["nombre_inf"] = f"{old_inf} ({tag})"
+
+
+def _write_config(path: str, config: dict) -> str:
+    """Write config to project.config, project.config.json, and a descriptive copy.
+
+    The descriptive copy uses the variant suffix as filename (e.g. emp_mecanicos.json).
+    Returns the path of the .json copy.
+    """
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+    json_path = path + ".json"
+    shutil.copy2(path, json_path)
+
+    # Descriptive copy named after the variant suffix
+    out_dir = os.path.dirname(path)
+    suffix = _variant_suffix(out_dir)
+    if suffix:
+        descriptive_name = suffix.lstrip("_") + ".json"
+        descriptive_path = os.path.join(out_dir, descriptive_name)
+        shutil.copy2(path, descriptive_path)
+
+    return json_path
+
+
 CALIBRE_NAMES = {
     0: '1/4"', 1: '3/8"', 2: '1/2"', 3: '5/8"',
     4: '3/4"', 5: '7/8"', 6: '1"', 7: '1-1/4"',
@@ -614,15 +676,17 @@ def update_config(
         else:
             resolved_output = resolved_input
 
-        # Write
-        with open(resolved_output, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
+        # Stamp variant identity so ProDet distinguishes this config
+        src_dir = os.path.dirname(resolved_input)
+        out_dir = os.path.dirname(resolved_output)
+        _stamp_variant_identity(config, out_dir, src_dir)
+
+        # Write project.config (local ProDet) + project.config.json (cloud)
+        json_path = _write_config(resolved_output, config)
 
         # Copy immutable companion files if output is in a different directory
         _COMPANION_FILES = ["project.cargas", "project.geom", "project.prodes"]
         copied_files = []
-        src_dir = os.path.dirname(resolved_input)
-        out_dir = os.path.dirname(resolved_output)
         if os.path.normpath(src_dir) != os.path.normpath(out_dir):
             for fname in _COMPANION_FILES:
                 src_file = os.path.join(src_dir, fname)
@@ -635,6 +699,7 @@ def update_config(
             "success": True,
             "changes_applied": applied,
             "output_path": resolved_output,
+            "json_path": json_path,
             "source_path": resolved_input,
         }
         if copied_files:
@@ -810,16 +875,18 @@ def set_floor_groups(
         else:
             resolved_output = resolved_input
 
-        # Write
+        # Stamp variant identity so ProDet distinguishes this config
         out_dir = os.path.dirname(resolved_output)
+        src_dir = os.path.dirname(resolved_input)
         os.makedirs(out_dir, exist_ok=True)
-        with open(resolved_output, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
+        _stamp_variant_identity(config, out_dir, src_dir)
+
+        # Write project.config (local ProDet) + project.config.json (cloud)
+        json_path = _write_config(resolved_output, config)
 
         # Copy immutable companion files if output is in a different directory
         _COMPANION_FILES = ["project.cargas", "project.geom", "project.prodes"]
         copied_files = []
-        src_dir = os.path.dirname(resolved_input)
         if os.path.normpath(src_dir) != os.path.normpath(out_dir):
             for fname in _COMPANION_FILES:
                 src_file = os.path.join(src_dir, fname)
@@ -835,6 +902,7 @@ def set_floor_groups(
             "total_grouped_floors": sum(len(g) for g in groups),
             "identical_range": all_floors[idx_start:idx_end + 1],
             "output_path": resolved_output,
+            "json_path": json_path,
             "source_path": resolved_input,
         }
         if copied_files:

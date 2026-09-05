@@ -9,9 +9,19 @@ RC Agent Platform — a Construction Intelligence System for reinforced concrete
 ## Commands
 
 ```bash
-# Setup
+# Setup — Windows, web app (creates both venvs under %LOCALAPPDATA%, installs deps)
+setup.bat
+
+# Setup — CLI only / non-Windows
 python3 -m venv venv && source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+
+# Run the web app (FastAPI on :8000 and Vite on :5273, in two windows)
+start.bat
+
+# Or run the two halves manually
+%LOCALAPPDATA%\rc_agent\venvs\backend\Scripts\python.exe -m uvicorn api.main:app --reload --port 8000
+cd frontend && npm run dev
 
 # Run interactive CLI (agent selection menu)
 python cli.py
@@ -69,6 +79,31 @@ All agents follow the same template:
 2. Tools are `@tool`-decorated pure functions that perform deterministic computation
 3. LLM (Claude Sonnet) handles reasoning; tools handle data processing
 4. `cli.py` provides the entry point with chat history, agent switching, and spinner UI
+
+### Web Application
+
+A FastAPI backend (`api/main.py`) wraps the same agents the CLI uses; a React +
+Vite frontend (`frontend/`) provides the chat UI.
+
+- **Backend** — `uvicorn api.main:app` on port 8000. `/api/chat/stream` accepts
+  `query`, `project`, `chat_history`, and `forced_agent`. `/api/health` reports
+  ProDet runtime readiness via `check_prodet_runtime()` in `prodet_agent.py`,
+  which also runs at import time so a missing venv surfaces at startup instead
+  of halfway through a tool call.
+- **Routing** — `ProDetAgentTeam.run` classifies with an LLM router by default;
+  passing a valid `forced_agent` skips the router entirely. The sidebar's agent
+  selector sets it, with "Auto-route" (`null`) as the default.
+- **Frontend** — Vite dev server on port 5273 (`strictPort: true`, because 5173
+  is taken by another app on this machine), proxying `/api` to the backend. The
+  sidebar footer shows a build badge with the branch and short commit currently
+  being served, plus an amber asterisk when the working tree is dirty. In dev it
+  re-reads `GET /__git-info` on window focus, so a `git checkout` is reflected
+  without restarting anything — see `frontend/vite-plugin-git-info.js`.
+- **Dropbox caveat** — this repo lives in Dropbox, which locks files while
+  syncing and breaks atomic renames. Both Python venvs and Vite's dep-optimizer
+  cache therefore live under `%LOCALAPPDATA%\rc_agent\`, never inside the repo.
+  Symptoms of getting this wrong: pip installs failing partway through, and a
+  blank frontend with 504 "Outdated Optimize Dep" on every dependency.
 
 ### Key Dependencies
 
@@ -181,6 +216,6 @@ JSON artifacts are the bridge between the pipeline and agents. The pipeline writ
 - `CLAUDE_MODEL` in `.env` (optional, defaults to `claude-sonnet-4-6`)
 - `PRODET_ROOT` in `.env` — path to ProDes-Core source (Windows or WSL paths accepted, auto-converted)
 - `PRODET_PROJECTS` in `.env` — optional override for project folders (defaults to `projects/`; Windows or WSL paths accepted, auto-converted)
-- `PRODET_CONDA_ENV` in `.env` — conda environment name for ProDet (default: `ProDet-py39`)
+- `PRODET_PYTHON` in `.env` — optional absolute path to ProDet's venv python. Auto-discovered when unset: `%LOCALAPPDATA%\rc_agent\venvs\prodet\Scripts\python.exe` (created by `setup.bat`), then a `.venv`/`venv`/`env` beside `PRODET_ROOT`. ProDet is no longer launched through conda.
 - Default crew allocations in `scheduling_agent.py`: beams=2, columns=1, walls=1, slabs=2
 - Scheduling formulas: `duration_days = crew_hours / (n_crews × hours_per_day)`, floor duration = max across work types

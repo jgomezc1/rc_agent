@@ -51,41 +51,28 @@ Archetypes are **complete config snapshots** that the agent uses as starting poi
 
 | Parameter | Simple | Balanced | Cost-Opt | High-Rise | Speed | Prefab |
 |-----------|--------|----------|----------|-----------|-------|--------|
-| Beam ext stirrup | **3/8" only** | 3/8"-1/2" | 1/4"-1/2" | 3/8"-1/2" | **3/8" only** | **3/8" only** |
-| Beam int stirrup | **3/8" only** | 3/8"-1/2" | 1/4"-1/2" | **3/8" only** | **3/8" only** | **3/8" only** |
-| `sep_min` | 10 | 10 | **7.5** | 10 | 10 | 10 |
+| Beam ext stirrup | **3/8" only** | 3/8"-1/2" | 3/8"-1/2" | 3/8"-1/2" | **3/8" only** | **3/8" only** |
+| Beam int stirrup | **3/8" only** | 3/8"-1/2" | 3/8"-1/2" | **3/8" only** | **3/8" only** | **3/8" only** |
 
-**Pattern:** Simple, Speed, and Prefab force a single stirrup size. High-Rise allows a narrow range for external stirrups only. Cost-Optimized opens everything up.
+**Pattern:** Simple, Speed, and Prefab force a single stirrup size. High-Rise allows a narrow range for external stirrups only. Cost-Optimized uses the full 3/8"-1/2" range for both interior and exterior.
 
 ### Cluster D — Merging & Tolerances
 
 | Parameter | Simple | Balanced | Cost-Opt | High-Rise | Speed | Prefab |
 |-----------|--------|----------|----------|-----------|-------|--------|
-| `tol_union` (S/I) | 0.5/1.5 | 0.3/1.0 | **0.1/0.3** | 0.4/1.2 | **0.8/2.0** | **1.0/2.0** |
 | `long_homog` | 2 (1.00m) | 1 (0.50m) | **0** (0.10m) | 1 (0.50m) | **2** (1.00m) | **2** (1.00m) |
-| `max_long_NE` | 9.0 | 10.5 | **12.0** | 10.5 | 9.0 | 9.0 |
-| `maxva` | 6 | 12 | **24** | 10 | **4** | **4** |
+| `max_long_NE` | 12.0 | 9.0 | **12.0** | 10.5 | 9.0 | 9.0 |
+| `maxva` | 6 | 12 | **12** | 10 | **4** | **4** |
 
-**Pattern:** Clear gradient from Prefab/Speed (maximum merging) through to Cost-Optimized (minimum merging). Note that Prefab has the most aggressive tol_union (1.0m/2.0m) of any archetype and uses the coarsest cutting length rounding (long_homog=2, 1.00m multiples) — it wants identical cages for beams that are only approximately similar.
-
-### Cluster E — Overrides
-
-| Parameter | Simple | Balanced | Cost-Opt | High-Rise | Speed | Prefab |
-|-----------|--------|----------|----------|-----------|-------|--------|
-| Beam per-level | ❌ | ❌ | **✅** | ❌ | ❌ | ❌ |
-| Joist per-level | ❌ | ❌ | **✅** | ❌ | ❌ | ❌ |
-| Column f'c per-level | ❌ | ✅ | **✅** | ✅ | ❌ | ❌ |
-
-**Pattern:** Only Cost-Optimized enables full per-level overrides. Balanced and High-Rise enable column f'c only (standard practice). Simple, Speed, and Prefab disable everything for absolute uniformity.
+**Pattern:** `long_homog` is the primary merging control. Clear gradient from Prefab/Speed (coarsest rounding, long_homog=2, 1.00m multiples — maximum bar standardization) through to Cost-Optimized (finest rounding, long_homog=0, 0.10m multiples — minimum merging). Note: `tol_union` still exists in config files but no longer produces changes in reinforcement; effective merging is determined by the `long_homog` normalization multiple. `maxva` is capped at 12 in the Colombian context.
 
 ### Cluster F — Drawings
 
 | Parameter | Simple | Balanced | Cost-Opt | High-Rise | Speed | Prefab |
 |-----------|--------|----------|----------|-----------|-------|--------|
-| Organization | por_piso | por_piso | por_piso | por_piso | por_piso | **por_viga** |
-| Scale | **1:200** | 1:300 | 1:300 | 1:300 | **1:200** | **1:200** |
+| Organization | por_piso | por_piso | por_piso | por_piso | por_piso | **inline** |
 
-**Pattern:** Only Prefab changes the drawing organization to por_viga (factory work orders). Simple and Speed use larger scales for instant readability.
+**Pattern:** Only Prefab changes the drawing organization to inline (elements from consecutive stories combined in same sheet, matching factory workflow). All others use por_piso — the Colombian standard for floor-by-floor construction.
 
 ---
 
@@ -131,7 +118,7 @@ Engineer's Request
 2. **Select** the closest archetype using the decision tree.
 3. **Check** for secondary signals that warrant cluster-level adjustments.
 4. **Generate** the config by starting from the archetype and modifying specific parameters.
-5. **Validate** that no dangerous interactions are active (especially A×E).
+5. **Validate** that no dangerous interactions are active (especially B×D, A×C).
 6. **Disclose** the expected trade-offs using the archetype's `expected_outcomes`.
 
 ### Config → NL Workflow
@@ -140,7 +127,7 @@ Engineer's Request
 2. **Score** each cluster against the 6 archetypes to find the closest match per cluster.
 3. **Identify** the overall best-matching archetype and any cluster-level deviations.
 4. **Generate** a narrative using the matching archetype's description as the base, noting where the config deviates.
-5. **Flag** any active interactions (especially A×E, B×D).
+5. **Flag** any active interactions (especially B×D, A×C).
 6. **Tailor** the narrative to the target audience (owner, contractor, foreman, inspector).
 
 ### Example: Mokara Config → Archetype Matching
@@ -150,11 +137,10 @@ Engineer's Request
 | A | Balanced (calibre 3-6, dif=3) | Low |
 | B | Simple (empalmar=true, todo) | Zero |
 | C | Balanced (2-size range) | Low |
-| D | Balanced (0.3/1.0 tolerance) | Zero |
-| E | Simple (all overrides disabled) | Near-zero |
-| F | Balanced (1:300, por_piso) | Zero |
+| D | Balanced (long_homog=1, 0.50m rounding) | Zero |
+| F | Balanced (por_piso) | Zero |
 
-**Overall:** Mokara is closest to **Balanced** with **Cluster B and E pulled toward Simple**. This is a sensible hybrid: moderate material optimization with maximum construction flexibility and floor repetition.
+**Overall:** Mokara is closest to **Balanced** with **Cluster B pulled toward Simple**. This is a sensible hybrid: moderate material optimization with maximum construction flexibility and floor repetition.
 
 ---
 
